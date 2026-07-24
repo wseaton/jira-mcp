@@ -1,0 +1,25 @@
+# jira-mcp config. Compiled in as the default, and installed to ~/.config/jira-mcp/config.toml.
+# Env vars override everything here. Lookup: $JIRA_MCP_CONFIG, then ~/.config/jira-mcp/config.toml.
+
+# url = "https://your-site.atlassian.net"   # env: JIRA_URL
+# username = "you@corp.com"                 # env: JIRA_USERNAME
+# Token lookup order: JIRA_API_TOKEN, OS keychain (`jira-mcp --set-token`), token_file, inline token.
+keychain = true                             # env: JIRA_MCP_KEYCHAIN
+token_file = "~/.jiratoken"                 # env: JIRA_API_TOKEN_FILE
+read_only = false                           # env: JIRA_MCP_READ_ONLY
+
+# Custom fields shown by jira_get_issue. These ids are Red Hat's; find yours with `jira_fields`.
+[custom_fields]
+target_version = "customfield_10855"
+team = "customfield_10001"
+epic_link = "customfield_10014"
+product_manager = "customfield_10469"
+rice_score = "customfield_10864"
+reach = "customfield_10862"
+confidence = "customfield_10838"
+effort = "customfield_10637"
+release_type = "customfield_10851"
+status_summary = "customfield_10814"
+sfdc_cases_links = "customfield_10979"
+blocked = "customfield_10517"
+blocked_reason = "customfield_10483"

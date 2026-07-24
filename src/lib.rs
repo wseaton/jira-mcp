@@ -1,0 +1,38 @@
+//! A token-frugal JIRA Cloud client, its compact renderers, and the MCP server built on top.
+//!
+//! The binary (`src/main.rs`) is a thin wrapper: [`config::Config::load`] -> [`client::JiraClient`]
+//! -> [`server::JiraMcp`] over stdio.
+//!
+//! # Embedding
+//!
+//! Other MCP servers can reuse the parts without inheriting this server's tool surface — which
+//! matters when the host mediates what an agent may reach (read-only, no create/transition, …).
+//! Take the client and the renderers, keep your own tools:
+//!
+//! ```no_run
+//! use jira_mcp::{Config, JiraClient, render};
+//!
+//! # async fn example() -> anyhow::Result<()> {
+//! // `from_env` is strict (all three vars or nothing), for a host that injects credentials
+//! // server-side; `Config::load` adds the on-disk fallbacks a human install wants.
+//! let Some(cfg) = Config::from_env() else {
+//!     return Ok(()); // JIRA not configured: report `disabled` rather than failing
+//! };
+//! let jira = JiraClient::new(cfg);
+//! let issue = jira.get_issue("PROJ-1", false).await?;
+//! println!("{}", render::issue(&issue, jira.config(), 6000));
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! To expose this crate's full nine-tool surface instead, serve [`server::JiraMcp`] directly.
+
+pub mod client;
+pub mod config;
+pub mod keychain;
+pub mod render;
+pub mod server;
+
+pub use client::JiraClient;
+pub use config::Config;
+pub use server::JiraMcp;
