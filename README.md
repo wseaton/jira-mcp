@@ -1,6 +1,7 @@
 # jira-mcp
 
-A small MCP server for JIRA Cloud, built for agents that read a lot of tickets and pay for every token.
+A small MCP server for JIRA Cloud — and the same nine operations as a CLI — built for agents that
+read a lot of tickets and pay for every token.
 
 The official Atlassian MCP announces ~40 tools and answers in raw JIRA JSON. Between the tool schemas
 (which sit in context on *every* turn) and the payloads (which are mostly `self` links, avatar urls,
@@ -63,16 +64,43 @@ Authority is one setting, `access`, enforced in the client under every tool:
 | `read-comment` | reads plus `jira_add_comment` |
 | `read-write` (default) | everything |
 
+## Also a CLI
+
+Every tool is a subcommand over the same code, printing the same bytes. MCP for a lookup
+mid-conversation; the CLI when an agent wants to script JIRA — loop over keys, pipe into grep, pull
+one field out of thirty issues without thirty tool calls.
+
+```bash
+jira-mcp search 'project = PROJ AND updated >= -7d ORDER BY updated DESC' -l 20
+jira-mcp issue PROJ-142 --comments --max-chars 2000
+jira-mcp comment PROJ-142 - <<'EOF'
+multi-line body from stdin
+EOF
+jira-mcp transition PROJ-142            # no target: list what's reachable
+jira-mcp issue PROJ-142 --json | jq .   # when you need to parse, not read
+```
+
+`jira-mcp --help` lists them. With no subcommand it serves MCP over stdio, which is what an MCP
+client expects when it spawns the binary.
+
+### Agent skill
+
+[`skills/jira/SKILL.md`](skills/jira/SKILL.md) teaches an agent the CLI: the verbs, JQL patterns
+worth knowing, the scripting idioms, and the traps (transitions are workflow-specific, `--label`
+replaces rather than appends). Install it by symlinking:
+
+```bash
+ln -s "$PWD/skills/jira" ~/.claude/skills/jira
+```
+
 ## Install
 
 Needs a Rust toolchain ([rustup](https://rustup.rs)). Nothing else: TLS is rustls, so there's no
 OpenSSL to hunt for.
 
 ```bash
-git clone https://github.com/wseaton/jira-mcp   # or just cd into your copy
-cd jira-mcp
-cargo install --path . --locked                 # -> ~/.cargo/bin/jira-mcp
-jira-mcp --write-config                         # -> ~/.config/jira-mcp/config.toml
+cargo install --git https://github.com/wseaton/jira-mcp   # -> ~/.cargo/bin/jira-mcp
+jira-mcp write-config                                     # -> ~/.config/jira-mcp/config.toml
 ```
 
 Prebuilt binaries for linux/macos on x86_64 and arm64 are attached to each
@@ -80,7 +108,7 @@ Prebuilt binaries for linux/macos on x86_64 and arm64 are attached to each
 
 ### Configure
 
-Fill in the two lines `--write-config` left commented out:
+Fill in the two lines `write-config` left commented out:
 
 ```toml
 url = "https://your-site.atlassian.net"
@@ -99,8 +127,8 @@ Then get a Cloud API token from
 (macOS Keychain, Windows Credential Manager, Secret Service on Linux):
 
 ```bash
-jira-mcp --set-token          # reads the token from stdin
-jira-mcp --check              # confirms what it found, and that it works
+jira-mcp set-token            # reads the token from stdin
+jira-mcp check                # confirms what it found, and that it works
 ```
 
 It reads from stdin so the token never lands in your shell history or in `ps` output. The token is
@@ -111,7 +139,7 @@ looked up in this order, and `--check` tells you which one answered:
 3. `token_file`, default `~/.jiratoken`
 4. `token` inline in the config
 
-`--delete-token` removes it from the keychain again.
+`jira-mcp delete-token` removes it from the keychain again.
 
 ### Hook it up to Claude Code
 
@@ -145,7 +173,7 @@ It's a plain stdio server, so the usual JSON works:
 `jira_get_issue` surfaces a curated set of custom fields by friendly name (`team`, `rice_score`,
 `target_version`, …), dropping the empty ones. That map lives in
 [`presets/redhat.toml`](presets/redhat.toml), which is both the compiled-in default and the template
-`--write-config` installs.
+`write-config` installs.
 
 Those ids are **Red Hat's** — every JIRA site numbers its custom fields differently. Find yours with
 the `jira_fields` tool, then replace the `[custom_fields]` table in your config (it replaces the
@@ -195,6 +223,8 @@ just smoke jira_get_issue '{"issue_key":"PROJ-142"}'
 just compare PROJ-142
 ```
 
+All nine operations are live-verified against a real JIRA Cloud site, writes included.
+
 Notes for anyone extending it:
 
 - Prose endpoints use `/rest/api/2` on purpose, so descriptions and comments are plain text instead
@@ -202,3 +232,5 @@ Notes for anyone extending it:
 - Search uses `POST /rest/api/3/search/jql`; the old `/rest/api/3/search` was removed (CHANGE-2046).
 - Adding a tool costs context on every turn, in every session. `tool_surface_stays_small` will fail
   when the count changes — that's the point, make it a decision.
+- Operations live in `ops.rs` and nowhere else. The MCP tool and the CLI subcommand are both thin
+  wrappers, so they can't drift — if they could, the skill teaching one would be lying about the other.

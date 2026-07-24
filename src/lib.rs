@@ -31,6 +31,7 @@
 pub mod client;
 pub mod config;
 pub mod keychain;
+pub mod ops;
 pub mod render;
 pub mod server;
 

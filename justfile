@@ -14,12 +14,12 @@ test:
 
 # Verify credentials resolve and the site answers. Run this FIRST when an install misbehaves.
 check: build
-    ./target/debug/jira-mcp --check
+    ./target/debug/jira-mcp check
 
 # Install to ~/.cargo/bin/jira-mcp and seed ~/.config/jira-mcp/config.toml if it's missing.
 install:
     cargo install --path . --locked
-    jira-mcp --write-config
+    jira-mcp write-config
 
 # Drive one tool over a real stdio MCP handshake, e.g.
 #   just smoke jira_get_issue '{"issue_key":"PROJ-142"}'

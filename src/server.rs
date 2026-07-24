@@ -5,13 +5,13 @@
 //! you never call; this one spends a few hundred.
 
 use crate::client::JiraClient;
-use crate::render;
+use crate::ops::{self, IssueFields};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{ServerCapabilities, ServerInfo};
 use rmcp::{ServerHandler, schemars, tool, tool_handler, tool_router};
 use serde::Deserialize;
-use serde_json::{Map, Value, json};
+use serde_json::Value;
 use std::sync::Arc;
 
 /// How much prose one description or comment may contribute before it's cut.
@@ -167,11 +167,7 @@ impl JiraMcp {
         Summary @assignee #labels. Use jira_get_issue for detail."
     )]
     async fn jira_search(&self, Parameters(a): Parameters<SearchArgs>) -> String {
-        match self.jira.search(&a.jql, a.limit).await {
-            Ok(rows) if json_wanted(&a.format) => dump(&Value::Array(rows)),
-            Ok(rows) => render::search_rows(&rows),
-            Err(e) => err(&e),
-        }
+        flatten(ops::search(&self.jira, &a.jql, a.limit, json_wanted(&a.format)).await)
     }
 
     #[tool(
@@ -180,72 +176,72 @@ impl JiraMcp {
         format=json for every raw field."
     )]
     async fn jira_get_issue(&self, Parameters(a): Parameters<GetIssueArgs>) -> String {
-        match self.jira.get_issue(&a.issue_key, a.comments).await {
-            Ok(v) if json_wanted(&a.format) => dump(&v),
-            Ok(v) => render::issue(&v, self.jira.config(), a.max_chars),
-            Err(e) => err(&e),
-        }
+        flatten(
+            ops::issue(
+                &self.jira,
+                &a.issue_key,
+                a.comments,
+                a.max_chars,
+                json_wanted(&a.format),
+            )
+            .await,
+        )
     }
 
     #[tool(description = "Read an issue's comment thread (newest N, rendered oldest-first).")]
     async fn jira_get_comments(&self, Parameters(a): Parameters<GetCommentsArgs>) -> String {
-        match self.jira.get_comments(&a.issue_key, a.limit).await {
-            Ok(mut list) => {
-                // Fetched newest-first (so a limit keeps the RECENT ones); read oldest-first.
-                list.reverse();
-                if json_wanted(&a.format) {
-                    dump(&Value::Array(list))
-                } else {
-                    render::comments(&list, a.max_chars)
-                }
-            }
-            Err(e) => err(&e),
-        }
+        flatten(
+            ops::comments(
+                &self.jira,
+                &a.issue_key,
+                a.limit,
+                a.max_chars,
+                json_wanted(&a.format),
+            )
+            .await,
+        )
     }
 
     #[tool(description = "Post a plain-text comment on an issue.")]
     async fn jira_add_comment(&self, Parameters(a): Parameters<AddCommentArgs>) -> String {
-        match self.jira.add_comment(&a.issue_key, &a.comment).await {
-            Ok(id) => format!("commented (id {id}) {}", self.jira.browse_url(&a.issue_key)),
-            Err(e) => err(&e),
-        }
+        flatten(ops::add_comment(&self.jira, &a.issue_key, &a.comment).await)
     }
 
     #[tool(description = "Create an issue. Returns the new key and url.")]
     async fn jira_create_issue(&self, Parameters(a): Parameters<CreateIssueArgs>) -> String {
-        let mut fields = Map::new();
-        fields.insert("project".into(), json!({ "key": a.project }));
-        fields.insert("issuetype".into(), json!({ "name": a.issue_type }));
-        fields.insert("summary".into(), Value::String(a.summary));
-        put(&mut fields, "description", a.description);
-        put(&mut fields, "parent", a.parent.map(|k| json!({ "key": k })));
-        put(&mut fields, "labels", a.labels);
-        if let Err(e) = merge_extra(&mut fields, a.fields) {
-            return e;
-        }
-        match self.jira.create_issue(fields).await {
-            Ok(key) => format!("created {key} {}", self.jira.browse_url(&key)),
-            Err(e) => err(&e),
-        }
+        flatten(
+            ops::create_issue(
+                &self.jira,
+                &a.project,
+                &a.issue_type,
+                a.summary,
+                a.parent,
+                IssueFields {
+                    description: a.description,
+                    labels: a.labels,
+                    extra: a.fields,
+                    ..Default::default()
+                },
+            )
+            .await,
+        )
     }
 
     #[tool(description = "Edit an issue's fields in place.")]
     async fn jira_update_issue(&self, Parameters(a): Parameters<UpdateIssueArgs>) -> String {
-        let mut fields = Map::new();
-        put(&mut fields, "summary", a.summary);
-        put(&mut fields, "description", a.description);
-        put(&mut fields, "labels", a.labels);
-        if let Err(e) = merge_extra(&mut fields, a.fields) {
-            return e;
-        }
-        if fields.is_empty() {
-            return "error: nothing to update (pass summary, description, labels, or fields)"
-                .into();
-        }
-        match self.jira.update_issue(&a.issue_key, fields).await {
-            Ok(()) => format!("updated {}", self.jira.browse_url(&a.issue_key)),
-            Err(e) => err(&e),
-        }
+        flatten(
+            ops::update_issue(
+                &self.jira,
+                &a.issue_key,
+                IssueFields {
+                    summary: a.summary,
+                    description: a.description,
+                    labels: a.labels,
+                    extra: a.fields,
+                },
+            )
+            .await,
+        )
     }
 
     #[tool(
@@ -253,28 +249,7 @@ impl JiraMcp {
         the transitions available from the current status."
     )]
     async fn jira_transition(&self, Parameters(a): Parameters<TransitionArgs>) -> String {
-        let available = match self.jira.transitions(&a.issue_key).await {
-            Ok(t) => t,
-            Err(e) => return err(&e),
-        };
-        let Some(want) = a.to else {
-            let names: Vec<_> = available.into_iter().map(|(_, n)| n).collect();
-            return format!("transitions: {}", names.join(", "));
-        };
-        let Some((id, name)) = available
-            .iter()
-            .find(|(_, n)| n.eq_ignore_ascii_case(want.trim()))
-        else {
-            let names: Vec<_> = available.iter().map(|(_, n)| n.as_str()).collect();
-            return format!(
-                "error: no transition named {want:?}; available: {}",
-                names.join(", ")
-            );
-        };
-        match self.jira.transition(&a.issue_key, id).await {
-            Ok(()) => format!("{} -> {name}", a.issue_key),
-            Err(e) => err(&e),
-        }
+        flatten(ops::transition(&self.jira, &a.issue_key, a.to.as_deref()).await)
     }
 
     #[tool(
@@ -282,19 +257,15 @@ impl JiraMcp {
         list the site's link types with their direction words."
     )]
     async fn jira_link_issues(&self, Parameters(a): Parameters<LinkArgs>) -> String {
-        let Some(link_type) = a.link_type else {
-            return match self.jira.link_types().await {
-                Ok(t) => render::link_types(&t),
-                Err(e) => err(&e),
-            };
-        };
-        let (Some(inward), Some(outward)) = (a.inward_key, a.outward_key) else {
-            return "error: link_type needs both inward_key and outward_key".into();
-        };
-        match self.jira.link(&link_type, &inward, &outward).await {
-            Ok(()) => format!("{inward} {link_type} {outward}"),
-            Err(e) => err(&e),
-        }
+        flatten(
+            ops::link(
+                &self.jira,
+                a.link_type.as_deref(),
+                a.inward_key.as_deref(),
+                a.outward_key.as_deref(),
+            )
+            .await,
+        )
     }
 
     #[tool(
@@ -302,31 +273,7 @@ impl JiraMcp {
         escape hatch on create/update."
     )]
     async fn jira_fields(&self, Parameters(a): Parameters<FieldsArgs>) -> String {
-        match self.jira.fields().await {
-            Ok(all) => render::fields(&all, &a.query),
-            Err(e) => err(&e),
-        }
-    }
-}
-
-/// Set a field only when the caller supplied one — an absent arg must not clear the value in JIRA.
-fn put<T: Into<Value>>(fields: &mut Map<String, Value>, key: &str, value: Option<T>) {
-    if let Some(v) = value {
-        fields.insert(key.to_string(), v.into());
-    }
-}
-
-/// Merge the raw `fields` escape hatch last, so it can override anything the typed args set.
-fn merge_extra(fields: &mut Map<String, Value>, extra: Option<Value>) -> Result<(), String> {
-    match extra {
-        None | Some(Value::Null) => Ok(()),
-        Some(Value::Object(m)) => {
-            fields.extend(m);
-            Ok(())
-        }
-        Some(other) => Err(format!(
-            "error: `fields` must be a JSON object of field id -> value, got {other}"
-        )),
+        flatten(ops::fields(&self.jira, &a.query).await)
     }
 }
 
@@ -334,15 +281,10 @@ fn json_wanted(format: &str) -> bool {
     format.eq_ignore_ascii_case("json")
 }
 
-/// `format: "json"` output. Compact, not pretty-printed: the reader is a model that parses either
-/// one just as well, and indentation is pure cost.
-fn dump(v: &Value) -> String {
-    serde_json::to_string(v).unwrap_or_else(|e| format!("error: serializing response: {e}"))
-}
-
-/// Errors come back as a plain line the model can read (and act on) rather than a protocol fault.
-fn err(e: &anyhow::Error) -> String {
-    format!("error: {e:#}")
+/// An op's error becomes a plain line the model can read (and act on) rather than a protocol fault.
+/// The CLI does the opposite with the same `Result`: it exits non-zero.
+fn flatten(r: anyhow::Result<String>) -> String {
+    r.unwrap_or_else(|e| format!("error: {e:#}"))
 }
 
 #[tool_handler]
@@ -396,15 +338,5 @@ mod tests {
             .collect();
         assert_eq!(names.len(), 9, "tools: {names:?}");
         assert!(names.contains(&"jira_get_issue".to_string()), "{names:?}");
-    }
-
-    #[test]
-    fn extra_fields_override_typed_args() {
-        let mut fields = Map::new();
-        fields.insert("summary".into(), Value::String("typed".into()));
-        merge_extra(&mut fields, Some(serde_json::json!({"summary": "raw"})))
-            .expect("object merges");
-        assert_eq!(fields["summary"], "raw");
-        assert!(merge_extra(&mut fields, Some(serde_json::json!("nope"))).is_err());
     }
 }

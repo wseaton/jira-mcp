@@ -30,6 +30,9 @@ struct File {
     keychain: Option<bool>,
     /// `read-only`, `read-comment`, or `read-write`. Default read-write.
     access: Option<Access>,
+    /// v0.1's boolean, still honored so an older config doesn't fail to parse on upgrade.
+    /// `deny_unknown_fields` means dropping it outright would be a hard error, not a shrug.
+    read_only: Option<bool>,
     /// friendly name -> `customfield_NNNNN`. Replaces the default map wholesale when present.
     custom_fields: Option<BTreeMap<String, String>>,
 }
@@ -181,6 +184,7 @@ impl Config {
             token_source,
             access: env_access()
                 .or(file.access)
+                .or_else(|| legacy_read_only(file))
                 .or(defaults.access)
                 .unwrap_or(Access::ReadWrite),
             custom_fields,
@@ -295,6 +299,19 @@ fn pairs(map: BTreeMap<String, String>) -> Vec<(String, String)> {
 /// A non-empty env var.
 fn env(key: &str) -> Option<String> {
     std::env::var(key).ok().filter(|v| !v.trim().is_empty())
+}
+
+/// Honor a v0.1 config's `read_only = true` as `access = "read-only"`, once, loudly. `read_only =
+/// false` maps to nothing: it was the old default, so treating it as an explicit "read-write" would
+/// let a stale file silently outrank a deliberate `access` in the shipped defaults.
+fn legacy_read_only(file: &File) -> Option<Access> {
+    match file.read_only? {
+        true => {
+            eprintln!("jira-mcp: `read_only` is deprecated; use `access = \"read-only\"`");
+            Some(Access::ReadOnly)
+        }
+        false => None,
+    }
 }
 
 /// `JIRA_MCP_ACCESS=read-only|read-comment|read-write`, or the older boolean `JIRA_MCP_READ_ONLY=1`.
