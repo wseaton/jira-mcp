@@ -373,7 +373,7 @@ mod tests {
             email: "me@x".into(),
             token: "t".into(),
             token_source: crate::config::TokenSource::Inline,
-            read_only: false,
+            access: crate::config::Access::ReadWrite,
             custom_fields: Vec::new(),
         })))
     }

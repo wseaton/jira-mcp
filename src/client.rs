@@ -7,7 +7,7 @@
 //!   descriptions and comment bodies are PLAIN TEXT instead of ADF document JSON. ADF round-trips are
 //!   a tax on both ends: the model can't read it cheaply and can't write it correctly.
 
-use crate::config::Config;
+use crate::config::{Access, Config};
 use anyhow::{Context, Result, bail};
 use serde_json::{Map, Value, json};
 
@@ -44,11 +44,14 @@ impl JiraClient {
             .header("Accept", "application/json")
     }
 
-    /// Refuse a mutation when the server was started read-only.
-    fn writable(&self) -> Result<()> {
-        if self.cfg.read_only {
+    /// The single choke point for authority: every mutating call goes through here first, so an
+    /// embedding host that configures `read-comment` cannot be talked into a create by any tool,
+    /// present or future.
+    fn require(&self, need: Access) -> Result<()> {
+        if !self.cfg.access.allows(need) {
             bail!(
-                "this jira-mcp server is read-only (JIRA_MCP_READ_ONLY is set); unset it to allow writes"
+                "this jira-mcp client is configured {} — {need} is required for that call",
+                self.cfg.access
             );
         }
         Ok(())
@@ -100,7 +103,7 @@ impl JiraClient {
 
     /// Post a plain-text comment. Returns the new comment id.
     pub async fn add_comment(&self, key: &str, body: &str) -> Result<String> {
-        self.writable()?;
+        self.require(Access::ReadComment)?;
         let v = self
             .send(
                 self.req(
@@ -116,7 +119,7 @@ impl JiraClient {
 
     /// Create an issue from an already-assembled `fields` object. Returns the new key.
     pub async fn create_issue(&self, fields: Map<String, Value>) -> Result<String> {
-        self.writable()?;
+        self.require(Access::ReadWrite)?;
         let v = self
             .send(
                 self.req(reqwest::Method::POST, "/rest/api/2/issue")
@@ -132,7 +135,7 @@ impl JiraClient {
 
     /// Edit an issue's fields in place. A 204 carries no body, so there's nothing to return.
     pub async fn update_issue(&self, key: &str, fields: Map<String, Value>) -> Result<()> {
-        self.writable()?;
+        self.require(Access::ReadWrite)?;
         self.send(
             self.req(reqwest::Method::PUT, &format!("/rest/api/2/issue/{key}"))
                 .json(&json!({ "fields": Value::Object(fields) })),
@@ -165,7 +168,7 @@ impl JiraClient {
 
     /// Drive a transition by id (resolve the name first with [`Self::transitions`]).
     pub async fn transition(&self, key: &str, id: &str) -> Result<()> {
-        self.writable()?;
+        self.require(Access::ReadWrite)?;
         self.send(
             self.req(
                 reqwest::Method::POST,
@@ -180,7 +183,7 @@ impl JiraClient {
 
     /// Link two issues: `inward` <-link type-> `outward` (e.g. Blocks: inward blocks outward).
     pub async fn link(&self, link_type: &str, inward: &str, outward: &str) -> Result<()> {
-        self.writable()?;
+        self.require(Access::ReadWrite)?;
         self.send(
             self.req(reqwest::Method::POST, "/rest/api/2/issueLink")
                 .json(&json!({

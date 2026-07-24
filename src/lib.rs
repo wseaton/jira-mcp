@@ -10,14 +10,15 @@
 //! Take the client and the renderers, keep your own tools:
 //!
 //! ```no_run
-//! use jira_mcp::{Config, JiraClient, render};
+//! use jira_mcp::{Access, Config, JiraClient, render};
 //!
 //! # async fn example() -> anyhow::Result<()> {
 //! // `from_env` is strict (all three vars or nothing), for a host that injects credentials
 //! // server-side; `Config::load` adds the on-disk fallbacks a human install wants.
-//! let Some(cfg) = Config::from_env() else {
+//! let Some(mut cfg) = Config::from_env() else {
 //!     return Ok(()); // JIRA not configured: report `disabled` rather than failing
 //! };
+//! cfg.access = Access::ReadComment; // this host's agent may read and comment, nothing more
 //! let jira = JiraClient::new(cfg);
 //! let issue = jira.get_issue("PROJ-1", false).await?;
 //! println!("{}", render::issue(&issue, jira.config(), 6000));
@@ -34,5 +35,5 @@ pub mod render;
 pub mod server;
 
 pub use client::JiraClient;
-pub use config::Config;
+pub use config::{Access, Config};
 pub use server::JiraMcp;

@@ -314,7 +314,7 @@ mod tests {
             email: "me@x".into(),
             token: "t".into(),
             token_source: crate::config::TokenSource::Inline,
-            read_only: false,
+            access: crate::config::Access::ReadWrite,
             custom_fields: vec![
                 ("team".into(), "customfield_10001".into()),
                 ("rice_score".into(), "customfield_10864".into()),

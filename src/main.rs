@@ -118,14 +118,7 @@ async fn check(jira: &JiraClient) -> Result<()> {
     let cfg = jira.config();
     println!("site:    {}", cfg.base);
     println!("user:    {}", cfg.email);
-    println!(
-        "mode:    {}",
-        if cfg.read_only {
-            "read-only"
-        } else {
-            "read-write"
-        }
-    );
+    println!("access:  {}", cfg.access);
     println!("token:   {}", cfg.token_source);
     println!("fields:  {} curated custom fields", cfg.custom_fields.len());
     let fields = jira.fields().await.context("calling JIRA (auth check)")?;

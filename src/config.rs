@@ -28,9 +28,49 @@ struct File {
     token_file: Option<String>,
     /// Look the token up in the OS credential store. Default true.
     keychain: Option<bool>,
-    read_only: Option<bool>,
+    /// `read-only`, `read-comment`, or `read-write`. Default read-write.
+    access: Option<Access>,
     /// friendly name -> `customfield_NNNNN`. Replaces the default map wholesale when present.
     custom_fields: Option<BTreeMap<String, String>>,
+}
+
+/// How much authority the tools have. A bool can't express the middle case, and the middle case is
+/// the interesting one: an embedding host that wants an agent to READ requirements and leave a
+/// comment, but never create, edit, transition, or link anything.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Access {
+    /// Reads only. Every mutating tool refuses.
+    ReadOnly,
+    /// Reads and comments. `jira_add_comment` works; create/update/transition/link refuse.
+    ReadComment,
+    /// Everything.
+    ReadWrite,
+}
+
+impl Access {
+    /// Does this level grant what `need` requires? Levels are ordered, so this is a `>=`.
+    pub fn allows(self, need: Access) -> bool {
+        self.rank() >= need.rank()
+    }
+
+    fn rank(self) -> u8 {
+        match self {
+            Self::ReadOnly => 0,
+            Self::ReadComment => 1,
+            Self::ReadWrite => 2,
+        }
+    }
+}
+
+impl std::fmt::Display for Access {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::ReadOnly => "read-only",
+            Self::ReadComment => "read-comment",
+            Self::ReadWrite => "read-write",
+        })
+    }
 }
 
 /// Where the API token was found, in the order they're tried.
@@ -72,8 +112,8 @@ pub struct Config {
     /// Where that token came from — reported by `--check`, because "which of the four places is it
     /// reading?" is the first question when an install misbehaves.
     pub token_source: TokenSource,
-    /// When set, the mutating tools refuse instead of calling JIRA.
-    pub read_only: bool,
+    /// How much the tools may do. Enforced in the client, under every tool.
+    pub access: Access,
     /// Custom fields surfaced by `jira_get_issue`, friendly name -> field id.
     pub custom_fields: Vec<(String, String)>,
 }
@@ -85,7 +125,7 @@ impl std::fmt::Debug for Config {
             .field("email", &self.email)
             .field("token", &"<redacted>")
             .field("token_source", &self.token_source)
-            .field("read_only", &self.read_only)
+            .field("access", &self.access)
             .field("custom_fields", &self.custom_fields.len())
             .finish()
     }
@@ -103,7 +143,7 @@ impl Config {
             email: env("JIRA_USERNAME")?,
             token: env("JIRA_API_TOKEN")?,
             token_source: TokenSource::Env,
-            read_only: flag("JIRA_MCP_READ_ONLY").unwrap_or(false),
+            access: env_access().unwrap_or(Access::ReadWrite),
             custom_fields: defaults().custom_fields.map(pairs).unwrap_or_default(),
         })
     }
@@ -139,9 +179,10 @@ impl Config {
             email,
             token,
             token_source,
-            read_only: flag("JIRA_MCP_READ_ONLY")
-                .or(file.read_only)
-                .unwrap_or(false),
+            access: env_access()
+                .or(file.access)
+                .or(defaults.access)
+                .unwrap_or(Access::ReadWrite),
             custom_fields,
         })
     }
@@ -256,6 +297,26 @@ fn env(key: &str) -> Option<String> {
     std::env::var(key).ok().filter(|v| !v.trim().is_empty())
 }
 
+/// `JIRA_MCP_ACCESS=read-only|read-comment|read-write`, or the older boolean `JIRA_MCP_READ_ONLY=1`.
+/// An unparseable value fails CLOSED (read-only): a typo in a lock-down knob must not unlock it.
+fn env_access() -> Option<Access> {
+    if let Some(v) = env("JIRA_MCP_ACCESS") {
+        return Some(match v.to_ascii_lowercase().replace('_', "-").as_str() {
+            "read-write" => Access::ReadWrite,
+            "read-comment" => Access::ReadComment,
+            "read-only" => Access::ReadOnly,
+            other => {
+                eprintln!("jira-mcp: unknown JIRA_MCP_ACCESS {other:?}; falling back to read-only");
+                Access::ReadOnly
+            }
+        });
+    }
+    match flag("JIRA_MCP_READ_ONLY")? {
+        true => Some(Access::ReadOnly),
+        false => None,
+    }
+}
+
 /// A boolean env var: `1`/`true`/`yes` is on, anything else set is off.
 fn flag(key: &str) -> Option<bool> {
     let v = env(key)?.to_ascii_lowercase();
@@ -355,6 +416,27 @@ mod tests {
         assert_eq!(expand_home("~/.jiratoken"), home.join(".jiratoken"));
         assert_eq!(expand_home("/etc/tok"), PathBuf::from("/etc/tok"));
         assert_eq!(expand_home("a/~/b"), PathBuf::from("a/~/b"));
+    }
+
+    /// The ordering is the whole contract: read-comment must permit a comment and refuse a create,
+    /// or an embedding host's "read + comment" promise is decoration.
+    #[test]
+    fn access_levels_are_ordered() {
+        assert!(Access::ReadComment.allows(Access::ReadComment));
+        assert!(Access::ReadComment.allows(Access::ReadOnly));
+        assert!(!Access::ReadComment.allows(Access::ReadWrite));
+        assert!(!Access::ReadOnly.allows(Access::ReadComment));
+        assert!(Access::ReadWrite.allows(Access::ReadWrite));
+    }
+
+    #[test]
+    fn access_parses_from_config() {
+        let f: File = toml::from_str(r#"access = "read-comment""#).expect("parses");
+        assert_eq!(f.access, Some(Access::ReadComment));
+        assert!(
+            toml::from_str::<File>(r#"access = "read-everything""#).is_err(),
+            "an unknown level must fail loudly, not default to something permissive"
+        );
     }
 
     #[test]

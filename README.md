@@ -55,7 +55,13 @@ long prose.
 | `jira_link_issues` | Link two issues; omit `link_type` to list the site's types |
 | `jira_fields` | Find a `customfield_NNNNN` by name, for the escape hatch |
 
-Set `JIRA_MCP_READ_ONLY=1` and the five writing tools refuse instead of calling JIRA.
+Authority is one setting, `access`, enforced in the client under every tool:
+
+| `access` | What works |
+| --- | --- |
+| `read-only` | the four read tools |
+| `read-comment` | reads plus `jira_add_comment` |
+| `read-write` (default) | everything |
 
 ## Install
 
@@ -154,7 +160,7 @@ default wholesale, no merging). An empty table means no custom fields at all.
 | `keychain` | `JIRA_MCP_KEYCHAIN` | Look the token up in the OS credential store. Default true |
 | `token_file` | `JIRA_API_TOKEN_FILE` | Fallback token file. Default `~/.jiratoken` |
 | `token` | `JIRA_API_TOKEN` | The token inline. Last resort |
-| `read_only` | `JIRA_MCP_READ_ONLY` | Refuse every write |
+| `access` | `JIRA_MCP_ACCESS` | `read-only`, `read-comment`, or `read-write` |
 | `[custom_fields]` | — | `name = "customfield_N"` |
 
 Config file lookup: `$JIRA_MCP_CONFIG`, then `$XDG_CONFIG_HOME/jira-mcp/config.toml`, then
@@ -167,9 +173,10 @@ renderers without inheriting this one's nine tools — which matters when the ho
 agent may reach:
 
 ```rust
-use jira_mcp::{Config, JiraClient, render};
+use jira_mcp::{Access, Config, JiraClient, render};
 
-let Some(cfg) = Config::from_env() else { /* JIRA off: report `disabled` */ };
+let Some(mut cfg) = Config::from_env() else { /* JIRA off: report `disabled` */ };
+cfg.access = Access::ReadComment;   // this agent may read and comment, nothing more
 let jira = JiraClient::new(cfg);
 let issue = jira.get_issue("PROJ-1", false).await?;
 println!("{}", render::issue(&issue, jira.config(), 6000));

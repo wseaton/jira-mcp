@@ -6,7 +6,7 @@
 # Token lookup order: JIRA_API_TOKEN, OS keychain (`jira-mcp --set-token`), token_file, inline token.
 keychain = true                             # env: JIRA_MCP_KEYCHAIN
 token_file = "~/.jiratoken"                 # env: JIRA_API_TOKEN_FILE
-read_only = false                           # env: JIRA_MCP_READ_ONLY
+access = "read-write"                       # env: JIRA_MCP_ACCESS; or read-comment / read-only
 
 # Custom fields shown by jira_get_issue. These ids are Red Hat's; find yours with `jira_fields`.
 [custom_fields]
