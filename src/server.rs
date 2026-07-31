@@ -287,20 +287,17 @@ fn flatten(r: anyhow::Result<String>) -> String {
     r.unwrap_or_else(|e| format!("error: {e:#}"))
 }
 
-#[tool_handler]
+// Dispatch through the INSTANCE router, not rmcp's `Self::tool_router()` default: the router is
+// built once in `new` and callers may adjust it before serving.
+#[tool_handler(router = self.tool_router)]
 impl ServerHandler for JiraMcp {
     /// Advertise the `tools` capability during `initialize`. Without it a spec-compliant client
     /// (Claude Code) connects, sees no tools capability, and never calls `tools/list` — the server
     /// looks connected but exposes nothing.
     fn get_info(&self) -> ServerInfo {
-        ServerInfo {
-            capabilities: ServerCapabilities::builder().enable_tools().build(),
-            instructions: Some(
-                "JIRA Cloud. Read tools return compact text; pass format=\"json\" for raw payloads."
-                    .into(),
-            ),
-            ..Default::default()
-        }
+        ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
+            "JIRA Cloud. Read tools return compact text; pass format=\"json\" for raw payloads.",
+        )
     }
 }
 
