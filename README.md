@@ -4,7 +4,9 @@ MCP server and CLI for JIRA Cloud. Fourteen operations, compact plain-text outpu
 
 Built for agents that read many issues and pay per token. Measured on one feature request with a long
 description, a dozen labels, and two links: 3422 chars rendered against 18151 chars of raw JSON. The
-tool schemas total 9.8 KB, which is what sits in context every turn whether JIRA is used or not.
+tool schemas total 9.8 KB. Clients that announce every tool up front carry that in context on every
+turn; Claude Code defers MCP tool schemas and loads them on demand via tool search, so there the
+schema cost is per-use and the compact rendering is where the savings are.
 
 ```
 jira-mcp [COMMAND]
@@ -203,7 +205,8 @@ Constraints worth keeping:
 - Search uses `POST /rest/api/3/search/jql`. The old `/rest/api/3/search` was removed (CHANGE-2046).
 - Operations live in `ops.rs` alone. The MCP tool and the CLI subcommand are thin wrappers, so they
   cannot drift apart.
-- Each tool costs context every turn of every session. `tool_surface_stays_small` fails when the
-  count changes, to keep that a decision rather than a drift.
+- Each tool costs context: every turn in clients that load schemas up front, per lookup in clients
+  that defer them behind tool search. `tool_surface_stays_small` fails when the count changes, to
+  keep growth a decision rather than a drift.
 
 MIT.
