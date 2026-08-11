@@ -1,10 +1,10 @@
 # jira-mcp
 
-MCP server and CLI for JIRA Cloud. Nine operations, compact plain-text output, no ADF.
+MCP server and CLI for JIRA Cloud. Fourteen operations, compact plain-text output.
 
 Built for agents that read many issues and pay per token. Measured on one feature request with a long
 description, a dozen labels, and two links: 3422 chars rendered against 18151 chars of raw JSON. The
-tool schemas total 6.6 KB, which is what sits in context every turn whether JIRA is used or not.
+tool schemas total 9.8 KB, which is what sits in context every turn whether JIRA is used or not.
 
 ```
 jira-mcp [COMMAND]
@@ -82,7 +82,7 @@ Enforced in the client, beneath every operation, so a level cannot be widened by
 | --- | --- |
 | `read-only` | `search`, `issue`, `comments`, `fields` |
 | `read-comment` | the above plus `comment` |
-| `read-write` | all nine |
+| `read-write` | everything |
 
 ## Commands
 
@@ -96,6 +96,11 @@ Enforced in the client, beneath every operation, so a level cannot be widened by
 | `update <KEY> [-s TEXT] [-d TEXT\|-] [-l LABEL]… [--fields JSON]` | edit in place |
 | `transition <KEY> [TO]` | move status; omit `TO` to list what is reachable |
 | `link [TYPE] [INWARD] [OUTWARD]` | link two issues; omit all to list link types |
+| `add-labels <KEY> -l LABEL…` | append labels, leaving the rest alone |
+| `remove-labels <KEY> -l LABEL…` | remove specific labels |
+| `attach <KEY> <FILE> [--filename NAME] [--json]` | upload a file attachment |
+| `delete-attachment <ID>` | delete an attachment by id |
+| `markdown-to-adf [TEXT\|-]` | print the ADF JSON for markdown text |
 | `fields [QUERY]` | field ids matching a name substring |
 | `check` | verify credentials, report resolved settings |
 | `write-config` | install the config template; never overwrites |
@@ -103,8 +108,10 @@ Enforced in the client, beneath every operation, so a level cannot be widened by
 | `serve` | serve MCP over stdio (the default) |
 
 `--fields` is merged last and overrides typed flags. `-l/--label` on `update` replaces the label set
-rather than appending. Descriptions and comment bodies are plain text or JIRA wiki markup, never
-Markdown and never ADF.
+rather than appending; `add-labels`/`remove-labels` edit incrementally. Descriptions and comment
+bodies are plain text or JIRA wiki markup by default; `--description-format markdown` on `comment`,
+`create`, and `update` converts markdown to ADF on the way in, so headings, code blocks, tables, and
+links survive.
 
 Errors exit non-zero. Over MCP the same errors return as a readable line, since a tool error is data
 the model acts on.
@@ -112,7 +119,8 @@ the model acts on.
 ### MCP tools
 
 `jira_search`, `jira_get_issue`, `jira_get_comments`, `jira_add_comment`, `jira_create_issue`,
-`jira_update_issue`, `jira_transition`, `jira_link_issues`, `jira_fields`.
+`jira_update_issue`, `jira_transition`, `jira_link_issues`, `jira_add_labels`, `jira_remove_labels`,
+`jira_add_attachment`, `jira_delete_attachment`, `jira_markdown_to_adf`, `jira_fields`.
 
 Arguments match the commands. Read tools take `format: "json"` and `max_chars`.
 
@@ -185,12 +193,13 @@ just smoke jira_get_issue '{"issue_key":"PROJ-142"}'   # one tool over a real MC
 just compare PROJ-142                         # rendered size against raw JSON
 ```
 
-All nine operations are verified against a live JIRA Cloud site, writes included.
+Every operation is verified against a live JIRA Cloud site, writes included.
 
 Constraints worth keeping:
 
-- Prose endpoints use `/rest/api/2`, so descriptions and comments are plain text rather than ADF
-  documents. Do not move them to api/3.
+- Prose endpoints default to `/rest/api/2`, so descriptions and comments are plain text rather than
+  ADF documents. api/3 is reached only when a caller opts into `description_format=markdown`, and
+  reads never move there.
 - Search uses `POST /rest/api/3/search/jql`. The old `/rest/api/3/search` was removed (CHANGE-2046).
 - Operations live in `ops.rs` alone. The MCP tool and the CLI subcommand are thin wrappers, so they
   cannot drift apart.

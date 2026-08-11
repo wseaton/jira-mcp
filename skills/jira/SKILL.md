@@ -1,11 +1,11 @@
 ---
 name: jira
-description: Read and write JIRA Cloud issues from the shell with the jira-mcp CLI — search by JQL, read issues and comment threads, comment, create, update, transition, and link. Use when a task involves JIRA tickets, requirements written in an issue, sprint or backlog state, or when you need to leave a comment or file an issue. Output is compact plain text built for reading in context, and the same nine operations are available as MCP tools.
+description: Read and write JIRA Cloud issues from the shell with the jira-mcp CLI — search by JQL, read issues and comment threads, comment, create, update, transition, link, manage labels, and attach files. Use when a task involves JIRA tickets, requirements written in an issue, sprint or backlog state, or when you need to leave a comment or file an issue. Output is compact plain text built for reading in context, and the same fourteen operations are available as MCP tools.
 ---
 
 # Work JIRA from the shell
 
-`jira-mcp` is both an MCP server and a CLI over the same nine operations, printing
+`jira-mcp` is both an MCP server and a CLI over the same fourteen operations, printing
 the same bytes either way. Reach for the CLI when you want to **script** JIRA:
 loop over keys, pipe into grep, pull one field out of thirty issues. Reach for the
 MCP tools when you want a single lookup mid-conversation.
@@ -110,10 +110,31 @@ jira-mcp transition PROJ-142 'In Progress'
 # Link. Omit everything to list the site's link types and their direction words.
 jira-mcp link
 jira-mcp link Blocks PROJ-7 PROJ-142     # PROJ-7 blocks PROJ-142
+
+# Labels, incrementally — unlike `update --label`, these leave the rest alone.
+jira-mcp add-labels PROJ-142 -l needs-triage -l perf
+jira-mcp remove-labels PROJ-142 -l needs-triage
+
+# Attach a file. --json prints the attachment metadata (including the id).
+jira-mcp attach PROJ-142 report.md
+jira-mcp delete-attachment 10042
 ```
 
-Bodies and descriptions are **plain text / JIRA wiki markup**, not Markdown and not
-ADF. `h2. Heading`, `* bullet`, `{code}…{code}`.
+Bodies and descriptions are **plain text / JIRA wiki markup** by default: `h2. Heading`,
+`* bullet`, `{code}…{code}`. When you have real Markdown (headings, code blocks, tables,
+links) and want the formatting to survive, pass `--description-format markdown` to
+`comment`, `create`, or `update`:
+
+```bash
+jira-mcp comment PROJ-142 --description-format markdown - <<'EOF'
+## Findings
+
+| Case | Result |
+|------|--------|
+| warm | 12ms   |
+| cold | 340ms  |
+EOF
+```
 
 ### Custom fields
 
@@ -133,7 +154,7 @@ jira-mcp create -p PROJ -t Story -s 'x' --fields '{"customfield_10001":{"id":"42
 
 - **Transitions are workflow-specific.** Run `jira-mcp transition KEY` with no target
   and pick from what it lists; guessing a status name fails.
-- **`update --label` replaces the label set**, it doesn't append. Read the current
-  labels first if you mean to add one.
+- **`update --label` replaces the label set**, it doesn't append. Use `add-labels` /
+  `remove-labels` to edit incrementally.
 - **A create is hard to take back.** Confirm the project and issue type with the user
   when you're inferring them rather than being told.

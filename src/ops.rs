@@ -1,4 +1,4 @@
-//! The nine operations, once.
+//! The shared operations, once.
 //!
 //! Both front ends are thin over this module: [`crate::server`] wraps each one in an MCP tool, and
 //! the CLI wraps each in a subcommand. Neither owns any logic — an agent scripting `jira-mcp search`
@@ -9,10 +9,36 @@
 //! error is data the model acts on), the CLI side exits non-zero (a failed command is a failed
 //! command).
 
+use crate::adf;
 use crate::client::JiraClient;
 use crate::render;
 use anyhow::{Result, bail};
 use serde_json::{Map, Value, json};
+
+/// Whether description/comment prose is plain text (api/v2) or markdown that should be converted to
+/// ADF (api/v3). The default is plain text, preserving the existing behavior.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum ProseFormat {
+    /// Send as-is via api/v2 (plain text / wiki markup).
+    #[default]
+    Plain,
+    /// Convert markdown to ADF and send via api/v3 (rich formatting survives).
+    Markdown,
+}
+
+// Strict on purpose: a lenient parse would turn a typo like "markdwn" into a silent plain-text
+// post, and the model would never learn its formatting got dropped.
+impl std::str::FromStr for ProseFormat {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        match s.to_ascii_lowercase().as_str() {
+            "plain" => Ok(Self::Plain),
+            "markdown" | "md" => Ok(Self::Markdown),
+            other => bail!("unknown description_format {other:?} (use \"plain\" or \"markdown\")"),
+        }
+    }
+}
 
 /// Fields a create/update sets, assembled from typed args plus a raw escape hatch.
 #[derive(Debug, Default)]
@@ -79,8 +105,19 @@ pub async fn comments(
     })
 }
 
-pub async fn add_comment(jira: &JiraClient, key: &str, body: &str) -> Result<String> {
-    let id = jira.add_comment(key, body).await?;
+pub async fn add_comment(
+    jira: &JiraClient,
+    key: &str,
+    body: &str,
+    prose_format: ProseFormat,
+) -> Result<String> {
+    let id = match prose_format {
+        ProseFormat::Plain => jira.add_comment(key, body).await?,
+        ProseFormat::Markdown => {
+            let body_adf = adf::markdown_to_adf(body);
+            jira.add_comment_adf(key, body_adf).await?
+        }
+    };
     Ok(format!("commented (id {id}) {}", jira.browse_url(key)))
 }
 
@@ -91,12 +128,20 @@ pub async fn create_issue(
     summary: String,
     parent: Option<String>,
     fields: IssueFields,
+    prose_format: ProseFormat,
 ) -> Result<String> {
     let mut m = IssueFields {
         summary: Some(summary),
         ..fields
     }
     .into_map()?;
+    // When markdown format is requested, convert the description to ADF.
+    if prose_format == ProseFormat::Markdown
+        && let Some(desc) = m.get("description").and_then(Value::as_str)
+    {
+        let adf_val = adf::markdown_to_adf(desc);
+        m.insert("description".to_string(), adf_val);
+    }
     // Identity fields go in after, but never override an explicit `extra` — a caller who spells out
     // `issuetype` with an id means it.
     m.entry("project").or_insert(json!({ "key": project }));
@@ -105,16 +150,34 @@ pub async fn create_issue(
     if let Some(p) = parent {
         m.entry("parent").or_insert(json!({ "key": p }));
     }
-    let key = jira.create_issue(m).await?;
+    // api/v3 is required when the description is ADF.
+    let key = if prose_format == ProseFormat::Markdown {
+        jira.create_issue_v3(m).await?
+    } else {
+        jira.create_issue(m).await?
+    };
     Ok(format!("created {key} {}", jira.browse_url(&key)))
 }
 
-pub async fn update_issue(jira: &JiraClient, key: &str, fields: IssueFields) -> Result<String> {
-    let m = fields.into_map()?;
+pub async fn update_issue(
+    jira: &JiraClient,
+    key: &str,
+    fields: IssueFields,
+    prose_format: ProseFormat,
+) -> Result<String> {
+    let mut m = fields.into_map()?;
     if m.is_empty() {
         bail!("nothing to update (pass summary, description, labels, or fields)");
     }
-    jira.update_issue(key, m).await?;
+    if prose_format == ProseFormat::Markdown {
+        if let Some(desc) = m.get("description").and_then(Value::as_str) {
+            let adf_val = adf::markdown_to_adf(desc);
+            m.insert("description".to_string(), adf_val);
+        }
+        jira.update_issue_v3(key, m).await?;
+    } else {
+        jira.update_issue(key, m).await?;
+    }
     Ok(format!("updated {}", jira.browse_url(key)))
 }
 
@@ -156,6 +219,71 @@ pub async fn link(
     };
     jira.link(link_type, inward, outward).await?;
     Ok(format!("{inward} {link_type} {outward}"))
+}
+
+/// Add labels without replacing the existing set.
+pub async fn add_labels(jira: &JiraClient, key: &str, labels: &[String]) -> Result<String> {
+    if labels.is_empty() {
+        bail!("at least one label is required");
+    }
+    jira.add_labels(key, labels).await?;
+    Ok(format!(
+        "added {} to {}",
+        labels
+            .iter()
+            .map(|l| format!("#{l}"))
+            .collect::<Vec<_>>()
+            .join(" "),
+        jira.browse_url(key),
+    ))
+}
+
+/// Remove specific labels.
+pub async fn remove_labels(jira: &JiraClient, key: &str, labels: &[String]) -> Result<String> {
+    if labels.is_empty() {
+        bail!("at least one label is required");
+    }
+    jira.remove_labels(key, labels).await?;
+    Ok(format!(
+        "removed {} from {}",
+        labels
+            .iter()
+            .map(|l| format!("#{l}"))
+            .collect::<Vec<_>>()
+            .join(" "),
+        jira.browse_url(key),
+    ))
+}
+
+/// Upload a file as an attachment. Returns a one-line summary (or JSON).
+pub async fn add_attachment(
+    jira: &JiraClient,
+    key: &str,
+    filename: &str,
+    data: Vec<u8>,
+    json_out: bool,
+) -> Result<String> {
+    let v = jira.add_attachment(key, filename, data).await?;
+    if json_out {
+        return Ok(dump(&v));
+    }
+    // JIRA returns an array of attachment objects; we usually upload one file.
+    let id = v
+        .as_array()
+        .and_then(|a| a.first())
+        .and_then(|a| a.get("id"))
+        .and_then(Value::as_str)
+        .unwrap_or("?");
+    Ok(format!(
+        "attached {filename} (id {id}) to {}",
+        jira.browse_url(key)
+    ))
+}
+
+/// Delete an attachment by id.
+pub async fn delete_attachment(jira: &JiraClient, id: &str) -> Result<String> {
+    jira.delete_attachment(id).await?;
+    Ok(format!("deleted attachment {id}"))
 }
 
 /// Field ids by name substring — how you find the `customfield_NNNNN` for the escape hatch.

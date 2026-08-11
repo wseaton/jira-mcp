@@ -1,4 +1,4 @@
-//! The MCP tool surface: nine tools, deliberately.
+//! The MCP tool surface: fourteen tools.
 //!
 //! Tool *descriptions* are themselves context the model pays for on every single turn, so they're
 //! terse on purpose. The full-fat Atlassian MCP spends tens of thousands of tokens announcing tools
@@ -23,6 +23,12 @@ fn default_limit() -> u32 {
 }
 fn default_format() -> String {
     "text".into()
+}
+fn default_prose_format() -> String {
+    "plain".into()
+}
+fn default_encoding() -> String {
+    "utf8".into()
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -71,8 +77,13 @@ pub struct GetCommentsArgs {
 pub struct AddCommentArgs {
     /// Issue key.
     pub issue_key: String,
-    /// Comment body, plain text / JIRA wiki markup (NOT ADF).
+    /// Comment body. Plain text / JIRA wiki markup by default; markdown when
+    /// `description_format` says so.
     pub comment: String,
+    /// `plain` (default) or `markdown` — when `markdown`, the body is converted to ADF and posted
+    /// via api/v3 so rich formatting (headings, bold, code blocks, tables, links) survives.
+    #[serde(default = "default_prose_format")]
+    pub description_format: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -97,6 +108,10 @@ pub struct CreateIssueArgs {
     /// Use `jira_fields` to find ids.
     #[serde(default)]
     pub fields: Option<Value>,
+    /// `plain` (default) or `markdown` — when `markdown`, the description is converted to ADF
+    /// (headings, bold, code blocks, tables, links) and sent via api/v3.
+    #[serde(default = "default_prose_format")]
+    pub description_format: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -115,6 +130,10 @@ pub struct UpdateIssueArgs {
     /// Escape hatch: raw `fields` merged in last. Use `jira_fields` to find ids.
     #[serde(default)]
     pub fields: Option<Value>,
+    /// `plain` (default) or `markdown` — when `markdown`, the description is converted to ADF
+    /// (headings, bold, code blocks, tables, links) and sent via api/v3.
+    #[serde(default = "default_prose_format")]
+    pub description_format: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -137,6 +156,51 @@ pub struct LinkArgs {
     /// The issue on the OUTWARD side (for `Blocks`: the blocked one).
     #[serde(default)]
     pub outward_key: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct AddLabelsArgs {
+    /// Issue key.
+    pub issue_key: String,
+    /// Labels to add (does not remove existing ones).
+    pub labels: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct RemoveLabelsArgs {
+    /// Issue key.
+    pub issue_key: String,
+    /// Labels to remove.
+    pub labels: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct AddAttachmentArgs {
+    /// Issue key.
+    pub issue_key: String,
+    /// Filename for the attachment (e.g. `report.md`).
+    pub filename: String,
+    /// File content as a UTF-8 string. For binary files, base64-encode the content and set
+    /// `encoding` to `base64`.
+    pub content: String,
+    /// `utf8` (default) or `base64` — how `content` is encoded.
+    #[serde(default = "default_encoding")]
+    pub encoding: String,
+    /// `text` (default) or `json` (raw attachment metadata from JIRA).
+    #[serde(default = "default_format")]
+    pub format: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct DeleteAttachmentArgs {
+    /// Attachment id (from `jira_get_issue` format=json, or from `jira_add_attachment`).
+    pub attachment_id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct MarkdownToAdfArgs {
+    /// Markdown text to convert to ADF.
+    pub markdown: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -202,13 +266,25 @@ impl JiraMcp {
         )
     }
 
-    #[tool(description = "Post a plain-text comment on an issue.")]
+    #[tool(
+        description = "Post a comment. Set description_format='markdown' for rich formatting \
+        (headings, bold, code blocks, tables, links)."
+    )]
     async fn jira_add_comment(&self, Parameters(a): Parameters<AddCommentArgs>) -> String {
-        flatten(ops::add_comment(&self.jira, &a.issue_key, &a.comment).await)
+        let prose = match a.description_format.parse() {
+            Ok(p) => p,
+            Err(e) => return format!("error: {e:#}"),
+        };
+        flatten(ops::add_comment(&self.jira, &a.issue_key, &a.comment, prose).await)
     }
 
-    #[tool(description = "Create an issue. Returns the new key and url.")]
+    #[tool(description = "Create an issue. Returns the new key and url. Set \
+        description_format='markdown' for rich description formatting.")]
     async fn jira_create_issue(&self, Parameters(a): Parameters<CreateIssueArgs>) -> String {
+        let prose = match a.description_format.parse() {
+            Ok(p) => p,
+            Err(e) => return format!("error: {e:#}"),
+        };
         flatten(
             ops::create_issue(
                 &self.jira,
@@ -222,13 +298,21 @@ impl JiraMcp {
                     extra: a.fields,
                     ..Default::default()
                 },
+                prose,
             )
             .await,
         )
     }
 
-    #[tool(description = "Edit an issue's fields in place.")]
+    #[tool(
+        description = "Edit an issue's fields in place. Set description_format='markdown' for \
+        rich description formatting."
+    )]
     async fn jira_update_issue(&self, Parameters(a): Parameters<UpdateIssueArgs>) -> String {
+        let prose = match a.description_format.parse() {
+            Ok(p) => p,
+            Err(e) => return format!("error: {e:#}"),
+        };
         flatten(
             ops::update_issue(
                 &self.jira,
@@ -239,6 +323,7 @@ impl JiraMcp {
                     labels: a.labels,
                     extra: a.fields,
                 },
+                prose,
             )
             .await,
         )
@@ -266,6 +351,60 @@ impl JiraMcp {
             )
             .await,
         )
+    }
+
+    #[tool(description = "Add labels to an issue without removing existing ones.")]
+    async fn jira_add_labels(&self, Parameters(a): Parameters<AddLabelsArgs>) -> String {
+        flatten(ops::add_labels(&self.jira, &a.issue_key, &a.labels).await)
+    }
+
+    #[tool(description = "Remove specific labels from an issue.")]
+    async fn jira_remove_labels(&self, Parameters(a): Parameters<RemoveLabelsArgs>) -> String {
+        flatten(ops::remove_labels(&self.jira, &a.issue_key, &a.labels).await)
+    }
+
+    #[tool(
+        description = "Upload a file attachment to an issue. Pass content as UTF-8 text, or \
+        base64-encode binary content and set encoding='base64'."
+    )]
+    async fn jira_add_attachment(&self, Parameters(a): Parameters<AddAttachmentArgs>) -> String {
+        let data = if a.encoding.eq_ignore_ascii_case("base64") {
+            use ::base64::Engine;
+            match ::base64::engine::general_purpose::STANDARD.decode(&a.content) {
+                Ok(d) => d,
+                Err(e) => return format!("error: invalid base64: {e}"),
+            }
+        } else {
+            a.content.into_bytes()
+        };
+        flatten(
+            ops::add_attachment(
+                &self.jira,
+                &a.issue_key,
+                &a.filename,
+                data,
+                json_wanted(&a.format),
+            )
+            .await,
+        )
+    }
+
+    #[tool(description = "Delete an attachment by id.")]
+    async fn jira_delete_attachment(
+        &self,
+        Parameters(a): Parameters<DeleteAttachmentArgs>,
+    ) -> String {
+        flatten(ops::delete_attachment(&self.jira, &a.attachment_id).await)
+    }
+
+    #[tool(
+        description = "Convert markdown to Atlassian Document Format (ADF) JSON. Use when you need \
+        to build ADF for the `fields` escape hatch (e.g. setting description via raw fields on \
+        api/v3). For most cases, use description_format='markdown' on create/update/comment instead."
+    )]
+    async fn jira_markdown_to_adf(&self, Parameters(a): Parameters<MarkdownToAdfArgs>) -> String {
+        let adf = crate::adf::markdown_to_adf(&a.markdown);
+        serde_json::to_string(&adf).unwrap_or_else(|e| format!("error: {e}"))
     }
 
     #[tool(
@@ -333,7 +472,16 @@ mod tests {
             .into_iter()
             .map(|t| t.name.to_string())
             .collect();
-        assert_eq!(names.len(), 9, "tools: {names:?}");
+        assert_eq!(names.len(), 14, "tools: {names:?}");
         assert!(names.contains(&"jira_get_issue".to_string()), "{names:?}");
+        assert!(names.contains(&"jira_add_labels".to_string()), "{names:?}");
+        assert!(
+            names.contains(&"jira_add_attachment".to_string()),
+            "{names:?}"
+        );
+        assert!(
+            names.contains(&"jira_markdown_to_adf".to_string()),
+            "{names:?}"
+        );
     }
 }

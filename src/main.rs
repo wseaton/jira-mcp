@@ -1,8 +1,8 @@
-//! `jira-mcp` — a small MCP server for JIRA Cloud, and the same nine tools as a CLI.
+//! `jira-mcp` — a small MCP server for JIRA Cloud, and the same fourteen tools as a CLI.
 //!
 //! Why it exists: the official Atlassian MCP announces ~40 tools and answers in raw JIRA JSON, which
 //! together cost tens of thousands of context tokens before you've read a single ticket. This one
-//! carries nine tools and renders compact text (see [`jira_mcp::render`]).
+//! carries fourteen tools and renders compact text (see [`jira_mcp::render`]).
 //!
 //! With no subcommand it serves MCP over stdio, which is how a client launches it. Every subcommand
 //! is the same operation an MCP tool exposes, over the same [`jira_mcp::ops`] code, printing the same
@@ -84,6 +84,9 @@ enum Command {
         key: String,
         /// The comment body, or `-` to read stdin (which is how you post a heredoc).
         body: String,
+        /// `plain` (default) or `markdown` — markdown is converted to ADF for rich formatting.
+        #[arg(long, value_enum, default_value = "plain")]
+        description_format: ops::ProseFormat,
     },
 
     /// Create an issue.
@@ -109,6 +112,9 @@ enum Command {
         /// Raw fields JSON, merged last: '{"customfield_10001":{"id":"…"}}'.
         #[arg(long)]
         fields: Option<String>,
+        /// `plain` (default) or `markdown` — markdown is converted to ADF for rich formatting.
+        #[arg(long, value_enum, default_value = "plain")]
+        description_format: ops::ProseFormat,
     },
 
     /// Edit an issue's fields in place.
@@ -125,6 +131,9 @@ enum Command {
         /// Raw fields JSON, merged last.
         #[arg(long)]
         fields: Option<String>,
+        /// `plain` (default) or `markdown` — markdown is converted to ADF for rich formatting.
+        #[arg(long, value_enum, default_value = "plain")]
+        description_format: ops::ProseFormat,
     },
 
     /// Move an issue to another status. Omit the target to list what's available.
@@ -142,6 +151,48 @@ enum Command {
         inward: Option<String>,
         /// The outward issue (for Blocks: the blocked one).
         outward: Option<String>,
+    },
+
+    /// Add labels to an issue without removing existing ones.
+    AddLabels {
+        key: String,
+        /// A label to add. Repeat for several.
+        #[arg(short, long, required = true)]
+        label: Vec<String>,
+    },
+
+    /// Remove specific labels from an issue.
+    RemoveLabels {
+        key: String,
+        /// A label to remove. Repeat for several.
+        #[arg(short, long, required = true)]
+        label: Vec<String>,
+    },
+
+    /// Upload a file as an attachment.
+    Attach {
+        key: String,
+        /// Path to the file to attach.
+        file: String,
+        /// Override the filename sent to JIRA (defaults to the file's basename).
+        #[arg(long)]
+        filename: Option<String>,
+        /// Print the raw JIRA attachment metadata instead of the compact summary.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Delete an attachment by id.
+    DeleteAttachment {
+        /// Attachment id (from `jira-mcp issue --json` or `jira-mcp attach --json`).
+        id: String,
+    },
+
+    /// Convert markdown to Atlassian Document Format (ADF) JSON. Reads stdin when input is `-`.
+    MarkdownToAdf {
+        /// Markdown text, or `-` to read stdin.
+        #[arg(default_value = "-")]
+        input: String,
     },
 
     /// Look up field ids by name substring, for the --fields escape hatch.
@@ -167,6 +218,15 @@ async fn main() -> Result<()> {
             println!("removed the token for {account} from the keychain");
             return Ok(());
         }
+        Some(Command::MarkdownToAdf { input }) => {
+            let md = or_stdin(input.clone())?;
+            let adf = jira_mcp::adf::markdown_to_adf(&md);
+            println!(
+                "{}",
+                serde_json::to_string(&adf).unwrap_or_else(|e| format!("error: {e}"))
+            );
+            return Ok(());
+        }
         _ => {}
     }
 
@@ -188,9 +248,11 @@ async fn main() -> Result<()> {
             max_chars,
             json,
         }) => ops::comments(&jira, &key, limit, max_chars, json).await?,
-        Some(Command::Comment { key, body }) => {
-            ops::add_comment(&jira, &key, &or_stdin(body)?).await?
-        }
+        Some(Command::Comment {
+            key,
+            body,
+            description_format,
+        }) => ops::add_comment(&jira, &key, &or_stdin(body)?, description_format).await?,
         Some(Command::Create {
             project,
             issue_type,
@@ -199,6 +261,7 @@ async fn main() -> Result<()> {
             parent,
             label,
             fields,
+            description_format,
         }) => {
             ops::create_issue(
                 &jira,
@@ -212,6 +275,7 @@ async fn main() -> Result<()> {
                     extra: parse_fields(fields)?,
                     ..Default::default()
                 },
+                description_format,
             )
             .await?
         }
@@ -221,6 +285,7 @@ async fn main() -> Result<()> {
             description,
             label,
             fields,
+            description_format,
         }) => {
             ops::update_issue(
                 &jira,
@@ -231,6 +296,7 @@ async fn main() -> Result<()> {
                     labels: labels(label),
                     extra: parse_fields(fields)?,
                 },
+                description_format,
             )
             .await?
         }
@@ -250,9 +316,34 @@ async fn main() -> Result<()> {
             )
             .await?
         }
+        Some(Command::AddLabels { key, label }) => ops::add_labels(&jira, &key, &label).await?,
+        Some(Command::RemoveLabels { key, label }) => {
+            ops::remove_labels(&jira, &key, &label).await?
+        }
+        Some(Command::Attach {
+            key,
+            file,
+            filename,
+            json,
+        }) => {
+            let path = std::path::Path::new(&file);
+            let data =
+                std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+            let name = filename
+                .as_deref()
+                .or_else(|| path.file_name().and_then(|n| n.to_str()))
+                .unwrap_or("attachment");
+            ops::add_attachment(&jira, &key, name, data, json).await?
+        }
+        Some(Command::DeleteAttachment { id }) => ops::delete_attachment(&jira, &id).await?,
         Some(Command::Fields { query }) => ops::fields(&jira, &query).await?,
         // Handled above, before the config load.
-        Some(Command::WriteConfig | Command::SetToken | Command::DeleteToken) => unreachable!(),
+        Some(
+            Command::WriteConfig
+            | Command::SetToken
+            | Command::DeleteToken
+            | Command::MarkdownToAdf { .. },
+        ) => unreachable!(),
     };
     println!("{}", out.trim_end());
     Ok(())

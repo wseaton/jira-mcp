@@ -26,8 +26,9 @@
 //! # }
 //! ```
 //!
-//! To expose this crate's full nine-tool surface instead, serve [`server::JiraMcp`] directly.
+//! To expose this crate's full fourteen-tool surface instead, serve [`server::JiraMcp`] directly.
 
+pub mod adf;
 pub mod client;
 pub mod config;
 pub mod keychain;
