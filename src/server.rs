@@ -27,6 +27,14 @@ fn default_format() -> String {
 fn default_prose_format() -> String {
     "plain".into()
 }
+/// `serde_json::Value` generates an unconstrained schema (`{}`), so MCP clients don't know the
+/// parameter is an object and may serialize it as a string. Pinning to `type: object` fixes that.
+fn json_object_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    let mut m = serde_json::Map::new();
+    m.insert("type".into(), "object".into());
+    m.into()
+}
+
 fn default_encoding() -> String {
     "utf8".into()
 }
@@ -107,6 +115,7 @@ pub struct CreateIssueArgs {
     /// `{"customfield_10001": {"id": "…"}, "priority": {"name": "Major"}}`.
     /// Use `jira_fields` to find ids.
     #[serde(default)]
+    #[schemars(schema_with = "json_object_schema")]
     pub fields: Option<Value>,
     /// `plain` (default) or `markdown` — when `markdown`, the description is converted to ADF
     /// (headings, bold, code blocks, tables, links) and sent via api/v3.
@@ -129,6 +138,7 @@ pub struct UpdateIssueArgs {
     pub labels: Option<Vec<String>>,
     /// Escape hatch: raw `fields` merged in last. Use `jira_fields` to find ids.
     #[serde(default)]
+    #[schemars(schema_with = "json_object_schema")]
     pub fields: Option<Value>,
     /// `plain` (default) or `markdown` — when `markdown`, the description is converted to ADF
     /// (headings, bold, code blocks, tables, links) and sent via api/v3.
