@@ -8,32 +8,41 @@
 
 /// The service name entries are filed under. The account is the JIRA login email, so one machine can
 /// hold tokens for several accounts (or several sites) without collision.
-pub const SERVICE: &str = "jira-mcp";
+pub const SERVICE: &str = "ujira";
+/// The pre-rename service name. Reads fall back to it; writes go to [`SERVICE`].
+pub const LEGACY_SERVICE: &str = "jira-mcp";
 
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 mod imp {
     use anyhow::{Context, Result};
 
-    fn entry(account: &str) -> Result<keyring::Entry> {
-        keyring::Entry::new(super::SERVICE, account)
+    fn entry(service: &str, account: &str) -> Result<keyring::Entry> {
+        keyring::Entry::new(service, account)
             .with_context(|| format!("opening the credential store for {account}"))
     }
 
     /// The stored token, or `None` for any reason at all.
     pub fn get(account: &str) -> Option<String> {
-        entry(account).ok()?.get_password().ok()
+        [crate::keychain::SERVICE, crate::keychain::LEGACY_SERVICE]
+            .iter()
+            .find_map(|service| entry(service, account).ok()?.get_password().ok())
     }
 
     pub fn set(account: &str, token: &str) -> Result<()> {
-        entry(account)?
+        entry(crate::keychain::SERVICE, account)?
             .set_password(token)
             .with_context(|| format!("storing the token for {account}"))
     }
 
+    /// Removes the pre-rename entry too, so a delete can't leave a token behind under the old name.
+    /// Succeeds if either entry was deleted; errors only when neither existed.
     pub fn delete(account: &str) -> Result<()> {
-        entry(account)?
-            .delete_credential()
-            .with_context(|| format!("deleting the token for {account}"))
+        let deleted = [crate::keychain::SERVICE, crate::keychain::LEGACY_SERVICE]
+            .iter()
+            .filter(|service| entry(service, account).is_ok_and(|e| e.delete_credential().is_ok()))
+            .count();
+        anyhow::ensure!(deleted > 0, "no stored token for {account}");
+        Ok(())
     }
 }
 

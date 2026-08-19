@@ -1,11 +1,11 @@
 ---
 name: jira
-description: Read and write JIRA Cloud issues from the shell with the jira-mcp CLI — search by JQL, read issues and comment threads, comment, create, update, transition, link, manage labels, and attach files. Use when a task involves JIRA tickets, requirements written in an issue, sprint or backlog state, or when you need to leave a comment or file an issue. Output is compact plain text built for reading in context, and the same fourteen operations are available as MCP tools.
+description: Read and write JIRA Cloud issues from the shell with the ujira CLI — search by JQL, read issues and comment threads, comment, create, update, transition, link, manage labels, and attach files. Use when a task involves JIRA tickets, requirements written in an issue, sprint or backlog state, or when you need to leave a comment or file an issue. Output is compact plain text built for reading in context, and the same fourteen operations are available as MCP tools.
 ---
 
 # Work JIRA from the shell
 
-`jira-mcp` is both an MCP server and a CLI over the same fourteen operations, printing
+`ujira` is both an MCP server and a CLI over the same fourteen operations, printing
 the same bytes either way. Reach for the CLI when you want to **script** JIRA:
 loop over keys, pipe into grep, pull one field out of thirty issues. Reach for the
 MCP tools when you want a single lookup mid-conversation.
@@ -16,11 +16,11 @@ the actual work.
 
 ## Prerequisites
 
-- `jira-mcp` on PATH (`cargo install --git https://github.com/wseaton/jira-mcp`).
-- Working credentials: `jira-mcp check` prints the site, account, access level, and
+- `ujira` on PATH (`cargo install --git https://github.com/wseaton/ujira`).
+- Working credentials: `ujira check` prints the site, account, access level, and
   where the token came from. **Run it first** if anything behaves oddly; it
   distinguishes "not configured" from "wrong token" from "no permission".
-- Access level matters. `jira-mcp check` reports it:
+- Access level matters. `ujira check` reports it:
   - `read-only` — the four read verbs
   - `read-comment` — reads plus `comment`
   - `read-write` — everything
@@ -30,16 +30,16 @@ the actual work.
 
 ```bash
 # One compact line per issue: KEY [Type/Status] Summary @assignee #labels
-jira-mcp search 'project = PROJ AND status = "In Progress" ORDER BY updated DESC' -l 20
+ujira search 'project = PROJ AND status = "In Progress" ORDER BY updated DESC' -l 20
 
 # One issue: header fields, links, subtasks, curated custom fields, description
-jira-mcp issue PROJ-142
+ujira issue PROJ-142
 
 # ...with the comment thread, and a tighter cap on prose
-jira-mcp issue PROJ-142 --comments --max-chars 2000
+ujira issue PROJ-142 --comments --max-chars 2000
 
 # Just the thread (newest 10, printed oldest-first)
-jira-mcp comments PROJ-142 -l 10
+ujira comments PROJ-142 -l 10
 ```
 
 Empty fields are dropped, so what you see is what the issue has. Timestamps are
@@ -49,14 +49,14 @@ trimmed to the day, and Jira's `{color}` markup is stripped.
 
 ```bash
 # Everything assigned to me that isn't done
-jira-mcp search 'assignee = currentUser() AND statusCategory != Done'
+ujira search 'assignee = currentUser() AND statusCategory != Done'
 
 # Recently touched, most recent first — the usual "what's happening here"
-jira-mcp search 'project = PROJ AND updated >= -7d ORDER BY updated DESC'
+ujira search 'project = PROJ AND updated >= -7d ORDER BY updated DESC'
 
 # By label, by epic, by fix version
-jira-mcp search 'labels = platform AND fixVersion = "4.2"'
-jira-mcp search 'parent = PROJ-7'
+ujira search 'labels = platform AND fixVersion = "4.2"'
+ujira search 'parent = PROJ-7'
 ```
 
 `search` returns at most 100 (`-l`, default 25). Narrow the JQL rather than paging:
@@ -68,17 +68,17 @@ The one-line-per-issue format is built for this.
 
 ```bash
 # Read every open bug in a project, in one pass
-for key in $(jira-mcp search 'project = PROJ AND type = Bug AND statusCategory != Done' -l 50 \
+for key in $(ujira search 'project = PROJ AND type = Bug AND statusCategory != Done' -l 50 \
              | tail -n +2 | cut -d' ' -f1); do
-  jira-mcp issue "$key" --max-chars 800
+  ujira issue "$key" --max-chars 800
   echo "---"
 done
 
 # Which of these tickets mention a term?
-jira-mcp search 'project = PROJ AND updated >= -30d' -l 100 | grep -i cache
+ujira search 'project = PROJ AND updated >= -30d' -l 100 | grep -i cache
 
 # When you need to parse rather than read, ask for JSON
-jira-mcp issue PROJ-142 --json | jq -r '.fields.customfield_10001.name'
+ujira issue PROJ-142 --json | jq -r '.fields.customfield_10001.name'
 ```
 
 The first line of `search` output is the count (`12 issues`); `tail -n +2` skips it.
@@ -87,37 +87,37 @@ The first line of `search` output is the count (`12 issues`); `tail -n +2` skips
 
 ```bash
 # Comment. `-` reads the body from stdin, which is how you post multiple lines.
-jira-mcp comment PROJ-142 'Confirmed on 4.2; the fix is in #1234.'
-jira-mcp comment PROJ-142 - <<'EOF'
+ujira comment PROJ-142 'Confirmed on 4.2; the fix is in #1234.'
+ujira comment PROJ-142 - <<'EOF'
 Reproduced with:
   ./run --config cache.yaml
 EOF
 
 # Create. --label repeats; --parent puts it under an epic.
-jira-mcp create -p PROJ -t Story -s 'Cache-aware routing' \
+ujira create -p PROJ -t Story -s 'Cache-aware routing' \
   -d 'Route by cache residency instead of round-robin.' \
   --parent PROJ-7 --label routing --label perf
 
 # Update in place. Omitted fields are left alone; --label REPLACES the set.
-jira-mcp update PROJ-142 -s 'Better summary' -d - <<'EOF'
+ujira update PROJ-142 -s 'Better summary' -d - <<'EOF'
 Rewritten description.
 EOF
 
 # Move status. Omit the target to see what's reachable from here.
-jira-mcp transition PROJ-142
-jira-mcp transition PROJ-142 'In Progress'
+ujira transition PROJ-142
+ujira transition PROJ-142 'In Progress'
 
 # Link. Omit everything to list the site's link types and their direction words.
-jira-mcp link
-jira-mcp link Blocks PROJ-7 PROJ-142     # PROJ-7 blocks PROJ-142
+ujira link
+ujira link Blocks PROJ-7 PROJ-142     # PROJ-7 blocks PROJ-142
 
 # Labels, incrementally — unlike `update --label`, these leave the rest alone.
-jira-mcp add-labels PROJ-142 -l needs-triage -l perf
-jira-mcp remove-labels PROJ-142 -l needs-triage
+ujira add-labels PROJ-142 -l needs-triage -l perf
+ujira remove-labels PROJ-142 -l needs-triage
 
 # Attach a file. --json prints the attachment metadata (including the id).
-jira-mcp attach PROJ-142 report.md
-jira-mcp delete-attachment 10042
+ujira attach PROJ-142 report.md
+ujira delete-attachment 10042
 ```
 
 Bodies and descriptions are **plain text / JIRA wiki markup** by default: `h2. Heading`,
@@ -126,7 +126,7 @@ links) and want the formatting to survive, pass `--description-format markdown` 
 `comment`, `create`, or `update`:
 
 ```bash
-jira-mcp comment PROJ-142 --description-format markdown - <<'EOF'
+ujira comment PROJ-142 --description-format markdown - <<'EOF'
 ## Findings
 
 | Case | Result |
@@ -142,17 +142,17 @@ Typed flags cover the common fields; anything else goes through `--fields`, whic
 merged last and can override them:
 
 ```bash
-jira-mcp fields team                      # -> customfield_10001  Team
-jira-mcp create -p PROJ -t Story -s 'x' --fields '{"customfield_10001":{"id":"42"}}'
+ujira fields team                      # -> customfield_10001  Team
+ujira create -p PROJ -t Story -s 'x' --fields '{"customfield_10001":{"id":"42"}}'
 ```
 
-`jira-mcp issue` already surfaces a curated set of custom fields by friendly name
+`ujira issue` already surfaces a curated set of custom fields by friendly name
 (`team`, `rice_score`, `target_version`, …), configured in
-`~/.config/jira-mcp/config.toml`.
+`~/.config/ujira/config.toml`.
 
 ## Before you write
 
-- **Transitions are workflow-specific.** Run `jira-mcp transition KEY` with no target
+- **Transitions are workflow-specific.** Run `ujira transition KEY` with no target
   and pick from what it lists; guessing a status name fails.
 - **`update --label` replaces the label set**, it doesn't append. Use `add-labels` /
   `remove-labels` to edit incrementally.

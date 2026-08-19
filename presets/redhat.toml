@@ -1,12 +1,12 @@
-# jira-mcp config. Compiled in as the default, and installed to ~/.config/jira-mcp/config.toml.
-# Env vars override everything here. Lookup: $JIRA_MCP_CONFIG, then ~/.config/jira-mcp/config.toml.
+# ujira config. Compiled in as the default, and installed to ~/.config/ujira/config.toml.
+# Env vars override everything here. Lookup: $UJIRA_CONFIG, then ~/.config/ujira/config.toml.
 
 # url = "https://your-site.atlassian.net"   # env: JIRA_URL
 # username = "you@corp.com"                 # env: JIRA_USERNAME
-# Token lookup order: JIRA_API_TOKEN, OS keychain (`jira-mcp --set-token`), token_file, inline token.
-keychain = true                             # env: JIRA_MCP_KEYCHAIN
+# Token lookup order: JIRA_API_TOKEN, OS keychain (`ujira set-token`), token_file, inline token.
+keychain = true                             # env: UJIRA_KEYCHAIN
 token_file = "~/.jiratoken"                 # env: JIRA_API_TOKEN_FILE
-access = "read-write"                       # env: JIRA_MCP_ACCESS; or read-comment / read-only
+access = "read-write"                       # env: UJIRA_ACCESS; or read-comment / read-only
 
 # Custom fields shown by jira_get_issue. These ids are Red Hat's; find yours with `jira_fields`.
 [custom_fields]

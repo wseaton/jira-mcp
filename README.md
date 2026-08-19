@@ -1,6 +1,6 @@
-# jira-mcp
+# ujira
 
-MCP server and CLI for JIRA Cloud. Fourteen operations, compact plain-text output.
+µJIRA: MCP server and CLI for JIRA Cloud. Fourteen operations, compact plain-text output.
 
 Built for agents that read many issues and pay per token. Measured on one feature request with a long
 description, a dozen labels, and two links: 3422 chars rendered against 18151 chars of raw JSON. The
@@ -9,36 +9,36 @@ turn; Claude Code defers MCP tool schemas and loads them on demand via tool sear
 schema cost is per-use and the compact rendering is where the savings are.
 
 ```
-jira-mcp [COMMAND]
+ujira <COMMAND>
 ```
 
-With no command, serves MCP over stdio. Every command is the same operation an MCP tool exposes, over
-the same code, printing the same bytes.
+`ujira mcp serve` serves MCP over stdio. Every other command is the same operation an MCP tool
+exposes, over the same code, printing the same bytes.
 
 ## Install
 
 Requires a Rust toolchain. TLS is rustls; there is no OpenSSL dependency.
 
 ```bash
-cargo install --git https://github.com/wseaton/jira-mcp
-jira-mcp write-config     # -> ~/.config/jira-mcp/config.toml
-jira-mcp set-token        # reads the token from stdin, stores it in the OS keychain
-jira-mcp check            # verifies, and reports where each setting came from
+cargo install --git https://github.com/wseaton/ujira
+ujira write-config     # -> ~/.config/ujira/config.toml
+ujira set-token        # reads the token from stdin, stores it in the OS keychain
+ujira check            # verifies, and reports where each setting came from
 ```
 
 Prebuilt binaries for linux and macos on x86_64 and arm64 are attached to each
-[release](https://github.com/wseaton/jira-mcp/releases).
+[release](https://github.com/wseaton/ujira/releases).
 
 Register with Claude Code:
 
 ```bash
-claude mcp add --scope user jira -- ~/.cargo/bin/jira-mcp
+claude mcp add --scope user jira -- ~/.cargo/bin/ujira mcp serve
 ```
 
 Any other client, as stdio:
 
 ```json
-{ "mcpServers": { "jira": { "command": "/abs/path/to/jira-mcp" } } }
+{ "mcpServers": { "jira": { "command": "/abs/path/to/ujira", "args": ["mcp", "serve"] } } }
 ```
 
 ## Configuration
@@ -50,17 +50,18 @@ Precedence: environment variable, then the config file, then the compiled-in def
 | --- | --- | --- |
 | `url` | `JIRA_URL` | Site base url. Falls back to `server:` in a jira-cli config |
 | `username` | `JIRA_USERNAME` | Account email. Falls back to `login:` in a jira-cli config |
-| `keychain` | `JIRA_MCP_KEYCHAIN` | Consult the OS credential store. Default true |
+| `keychain` | `UJIRA_KEYCHAIN` | Consult the OS credential store. Default true |
 | `token_file` | `JIRA_API_TOKEN_FILE` | Token file. Default `~/.jiratoken` |
 | `token` | `JIRA_API_TOKEN` | Token inline |
-| `access` | `JIRA_MCP_ACCESS` | `read-only`, `read-comment`, or `read-write`. Default `read-write` |
+| `access` | `UJIRA_ACCESS` | `read-only`, `read-comment`, or `read-write`. Default `read-write` |
 | `[custom_fields]` | — | `friendly_name = "customfield_N"` |
 
-Config file lookup: `$JIRA_MCP_CONFIG`, `$XDG_CONFIG_HOME/jira-mcp/config.toml`,
-`~/.config/jira-mcp/config.toml`. `JIRA_CLI_CONFIG` relocates the
+Config file lookup: `$UJIRA_CONFIG`, `$XDG_CONFIG_HOME/ujira/config.toml`,
+`~/.config/ujira/config.toml`, then the pre-rename `jira-mcp/config.toml` when only it exists.
+The pre-rename `JIRA_MCP_*` env vars are still honored. `JIRA_CLI_CONFIG` relocates the
 [jira-cli](https://github.com/ankitpokhrel/jira-cli) file.
 
-Unknown keys are rejected. A malformed config file is fatal; a malformed `JIRA_MCP_ACCESS` falls back
+Unknown keys are rejected. A malformed config file is fatal; a malformed `UJIRA_ACCESS` falls back
 to `read-only`.
 
 ### Token
@@ -107,7 +108,7 @@ Enforced in the client, beneath every operation, so a level cannot be widened by
 | `check` | verify credentials, report resolved settings |
 | `write-config` | install the config template; never overwrites |
 | `set-token` / `delete-token` | manage the keychain entry |
-| `serve` | serve MCP over stdio (the default) |
+| `mcp serve` | serve MCP over stdio |
 
 `--fields` is merged last and overrides typed flags. `-l/--label` on `update` replaces the label set
 rather than appending; `add-labels`/`remove-labels` edit incrementally. Descriptions and comment
@@ -164,7 +165,7 @@ The crate is a library as well as a binary. An embedding host can reuse the clie
 without inheriting this tool surface:
 
 ```rust
-use jira_mcp::{Access, Config, JiraClient, render};
+use ujira::{Access, Config, JiraClient, render};
 
 let Some(mut cfg) = Config::from_env() else { /* JIRA off: report `disabled` */ };
 cfg.access = Access::ReadComment;
@@ -175,7 +176,7 @@ println!("{}", render::issue(&issue, jira.config(), 6000));
 
 `Config::from_env` is strict and reads no files, for a host that injects credentials itself.
 `Config::load` is the layered resolution the binary uses. To expose the full tool surface, serve
-`jira_mcp::JiraMcp`.
+`ujira::JiraMcp`.
 
 ## Agent skill
 

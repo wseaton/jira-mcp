@@ -52,7 +52,7 @@ impl JiraClient {
     fn require(&self, need: Access) -> Result<()> {
         if !self.cfg.access.allows(need) {
             bail!(
-                "this jira-mcp client is configured {} — {need} is required for that call",
+                "this ujira client is configured {} — {need} is required for that call",
                 self.cfg.access
             );
         }

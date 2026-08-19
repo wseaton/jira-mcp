@@ -13,7 +13,9 @@ use std::path::PathBuf;
 /// The shipped defaults, compiled in so a zero-config install still knows the custom-field map.
 const DEFAULTS: &str = include_str!("../presets/redhat.toml");
 /// Config path under `$XDG_CONFIG_HOME` (or `~/.config`).
-const CONFIG_PATH: &str = "jira-mcp/config.toml";
+const CONFIG_PATH: &str = "ujira/config.toml";
+/// The pre-rename config path, honored when only it exists.
+const LEGACY_CONFIG_PATH: &str = "jira-mcp/config.toml";
 /// The jira-cli config we can borrow `server:` / `login:` from.
 const CLI_CONFIG: &str = ".config/.jira/.config.yml";
 
@@ -200,7 +202,8 @@ fn resolve_token(file: &File, defaults: &File, account: &str) -> Result<(String,
     if let Some(t) = env("JIRA_API_TOKEN") {
         return Ok((t, TokenSource::Env));
     }
-    let use_keychain = flag("JIRA_MCP_KEYCHAIN")
+    let use_keychain = flag("UJIRA_KEYCHAIN")
+        .or_else(|| flag("JIRA_MCP_KEYCHAIN"))
         .or(file.keychain)
         .or(defaults.keychain)
         .unwrap_or(true);
@@ -234,13 +237,13 @@ fn resolve_token(file: &File, defaults: &File, account: &str) -> Result<(String,
     match file_err {
         Some((path, e)) => Err(e).with_context(|| {
             format!(
-                "no JIRA API token: run `jira-mcp --set-token`, set JIRA_API_TOKEN, or write one to {}",
+                "no JIRA API token: run `ujira set-token`, set JIRA_API_TOKEN, or write one to {}",
                 path.display()
             )
         }),
-        None => bail!(
-            "no JIRA API token: run `jira-mcp --set-token`, or set JIRA_API_TOKEN / `token_file`"
-        ),
+        None => {
+            bail!("no JIRA API token: run `ujira set-token`, or set JIRA_API_TOKEN / `token_file`")
+        }
     }
 }
 
@@ -255,7 +258,7 @@ fn non_empty(s: &str, what: &str) -> Result<String> {
 /// so it degrades to "no defaults" rather than taking the server down.
 fn defaults() -> File {
     toml::from_str(DEFAULTS).unwrap_or_else(|e| {
-        eprintln!("jira-mcp: built-in defaults are malformed ({e}); continuing without them");
+        eprintln!("ujira: built-in defaults are malformed ({e}); continuing without them");
         File::default()
     })
 }
@@ -272,15 +275,25 @@ fn file_config() -> Result<File> {
     toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))
 }
 
-/// `$JIRA_MCP_CONFIG`, else `$XDG_CONFIG_HOME/jira-mcp/config.toml`, else `~/.config/jira-mcp/…`.
+/// `$UJIRA_CONFIG` (or the pre-rename `$JIRA_MCP_CONFIG`), else `ujira/config.toml` under
+/// `$XDG_CONFIG_HOME` or `~/.config` — falling back to the pre-rename `jira-mcp/config.toml`
+/// when only that one exists.
 pub fn config_path() -> Option<PathBuf> {
-    if let Some(p) = env("JIRA_MCP_CONFIG") {
+    if let Some(p) = env("UJIRA_CONFIG").or_else(|| env("JIRA_MCP_CONFIG")) {
         return Some(expand_home(&p));
     }
-    if let Some(dir) = env("XDG_CONFIG_HOME") {
-        return Some(expand_home(&dir).join(CONFIG_PATH));
+    let config_dir = match env("XDG_CONFIG_HOME") {
+        Some(dir) => expand_home(&dir),
+        None => home()?.join(".config"),
+    };
+    let new = config_dir.join(CONFIG_PATH);
+    if !new.exists() {
+        let legacy = config_dir.join(LEGACY_CONFIG_PATH);
+        if legacy.exists() {
+            return Some(legacy);
+        }
     }
-    home().map(|h| h.join(".config").join(CONFIG_PATH))
+    Some(new)
 }
 
 /// Expand a leading `~/`, which people write in config files and `PathBuf` does not understand.
@@ -307,23 +320,24 @@ fn env(key: &str) -> Option<String> {
 fn legacy_read_only(file: &File) -> Option<Access> {
     match file.read_only? {
         true => {
-            eprintln!("jira-mcp: `read_only` is deprecated; use `access = \"read-only\"`");
+            eprintln!("ujira: `read_only` is deprecated; use `access = \"read-only\"`");
             Some(Access::ReadOnly)
         }
         false => None,
     }
 }
 
-/// `JIRA_MCP_ACCESS=read-only|read-comment|read-write`, or the older boolean `JIRA_MCP_READ_ONLY=1`.
+/// `UJIRA_ACCESS=read-only|read-comment|read-write` (or the pre-rename `JIRA_MCP_ACCESS`), or the
+/// older boolean `JIRA_MCP_READ_ONLY=1`.
 /// An unparseable value fails CLOSED (read-only): a typo in a lock-down knob must not unlock it.
 fn env_access() -> Option<Access> {
-    if let Some(v) = env("JIRA_MCP_ACCESS") {
+    if let Some(v) = env("UJIRA_ACCESS").or_else(|| env("JIRA_MCP_ACCESS")) {
         return Some(match v.to_ascii_lowercase().replace('_', "-").as_str() {
             "read-write" => Access::ReadWrite,
             "read-comment" => Access::ReadComment,
             "read-only" => Access::ReadOnly,
             other => {
-                eprintln!("jira-mcp: unknown JIRA_MCP_ACCESS {other:?}; falling back to read-only");
+                eprintln!("ujira: unknown access level {other:?}; falling back to read-only");
                 Access::ReadOnly
             }
         });

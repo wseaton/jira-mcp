@@ -10,7 +10,7 @@
 //! Take the client and the renderers, keep your own tools:
 //!
 //! ```no_run
-//! use jira_mcp::{Access, Config, JiraClient, render};
+//! use ujira::{Access, Config, JiraClient, render};
 //!
 //! # async fn example() -> anyhow::Result<()> {
 //! // `from_env` is strict (all three vars or nothing), for a host that injects credentials

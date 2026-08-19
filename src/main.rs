@@ -1,38 +1,39 @@
-//! `jira-mcp` — a small MCP server for JIRA Cloud, and the same fourteen tools as a CLI.
+//! `ujira` — a small MCP server for JIRA Cloud, and the same fourteen tools as a CLI.
 //!
 //! Why it exists: the official Atlassian MCP announces ~40 tools and answers in raw JIRA JSON, which
 //! together cost tens of thousands of context tokens before you've read a single ticket. This one
-//! carries fourteen tools and renders compact text (see [`jira_mcp::render`]).
+//! carries fourteen tools and renders compact text (see [`ujira::render`]).
 //!
-//! With no subcommand it serves MCP over stdio, which is how a client launches it. Every subcommand
-//! is the same operation an MCP tool exposes, over the same [`jira_mcp::ops`] code, printing the same
-//! bytes — so an agent can pipe, grep, and loop over `jira-mcp` in a shell script instead of making
+//! `ujira mcp serve` serves MCP over stdio, which is how a client launches it. Every other subcommand
+//! is the same operation an MCP tool exposes, over the same [`ujira::ops`] code, printing the same
+//! bytes — so an agent can pipe, grep, and loop over `ujira` in a shell script instead of making
 //! one tool call per issue, and get exactly what the tool would have returned.
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use jira_mcp::{Config, JiraClient, JiraMcp, ops, ops::IssueFields};
 use rmcp::ServiceExt;
 use rmcp::transport::stdio;
 use std::sync::Arc;
+use ujira::{Config, JiraClient, JiraMcp, ops, ops::IssueFields};
 
 /// A token-frugal JIRA Cloud client: an MCP server, and the same tools as a CLI.
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Cli {
     #[command(subcommand)]
-    command: Option<Command>,
+    command: Command,
 }
 
 #[derive(Subcommand)]
 enum Command {
-    /// Serve MCP over stdio (the default when no subcommand is given).
-    Serve,
+    /// MCP server operations.
+    #[command(subcommand)]
+    Mcp(McpCommand),
 
     /// Verify credentials against the live site and report where each setting came from.
     Check,
 
-    /// Write the default config to ~/.config/jira-mcp/config.toml. Never overwrites.
+    /// Write the default config to ~/.config/ujira/config.toml. Never overwrites.
     WriteConfig,
 
     /// Read a JIRA API token from stdin and store it in the OS keychain.
@@ -184,7 +185,7 @@ enum Command {
 
     /// Delete an attachment by id.
     DeleteAttachment {
-        /// Attachment id (from `jira-mcp issue --json` or `jira-mcp attach --json`).
+        /// Attachment id (from `ujira issue --json` or `ujira attach --json`).
         id: String,
     },
 
@@ -203,6 +204,12 @@ enum Command {
     },
 }
 
+#[derive(Subcommand)]
+enum McpCommand {
+    /// Serve MCP over stdio.
+    Serve,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -210,17 +217,17 @@ async fn main() -> Result<()> {
     // These three run BEFORE config resolution: each exists to fix a config that doesn't load yet,
     // so requiring a working one would be a circle.
     match &cli.command {
-        Some(Command::WriteConfig) => return write_config(),
-        Some(Command::SetToken) => return set_token(),
-        Some(Command::DeleteToken) => {
-            let account = jira_mcp::config::account()?;
-            jira_mcp::keychain::delete(&account)?;
+        Command::WriteConfig => return write_config(),
+        Command::SetToken => return set_token(),
+        Command::DeleteToken => {
+            let account = ujira::config::account()?;
+            ujira::keychain::delete(&account)?;
             println!("removed the token for {account} from the keychain");
             return Ok(());
         }
-        Some(Command::MarkdownToAdf { input }) => {
+        Command::MarkdownToAdf { input } => {
             let md = or_stdin(input.clone())?;
-            let adf = jira_mcp::adf::markdown_to_adf(&md);
+            let adf = ujira::adf::markdown_to_adf(&md);
             println!(
                 "{}",
                 serde_json::to_string(&adf).unwrap_or_else(|e| format!("error: {e}"))
@@ -233,27 +240,27 @@ async fn main() -> Result<()> {
     let jira = Arc::new(JiraClient::new(Config::load()?));
 
     let out = match cli.command {
-        None | Some(Command::Serve) => return serve(jira).await,
-        Some(Command::Check) => return check(&jira).await,
-        Some(Command::Search { jql, limit, json }) => ops::search(&jira, &jql, limit, json).await?,
-        Some(Command::Issue {
+        Command::Mcp(McpCommand::Serve) => return serve(jira).await,
+        Command::Check => return check(&jira).await,
+        Command::Search { jql, limit, json } => ops::search(&jira, &jql, limit, json).await?,
+        Command::Issue {
             key,
             comments,
             max_chars,
             json,
-        }) => ops::issue(&jira, &key, comments, max_chars, json).await?,
-        Some(Command::Comments {
+        } => ops::issue(&jira, &key, comments, max_chars, json).await?,
+        Command::Comments {
             key,
             limit,
             max_chars,
             json,
-        }) => ops::comments(&jira, &key, limit, max_chars, json).await?,
-        Some(Command::Comment {
+        } => ops::comments(&jira, &key, limit, max_chars, json).await?,
+        Command::Comment {
             key,
             body,
             description_format,
-        }) => ops::add_comment(&jira, &key, &or_stdin(body)?, description_format).await?,
-        Some(Command::Create {
+        } => ops::add_comment(&jira, &key, &or_stdin(body)?, description_format).await?,
+        Command::Create {
             project,
             issue_type,
             summary,
@@ -262,7 +269,7 @@ async fn main() -> Result<()> {
             label,
             fields,
             description_format,
-        }) => {
+        } => {
             ops::create_issue(
                 &jira,
                 &project,
@@ -279,14 +286,14 @@ async fn main() -> Result<()> {
             )
             .await?
         }
-        Some(Command::Update {
+        Command::Update {
             key,
             summary,
             description,
             label,
             fields,
             description_format,
-        }) => {
+        } => {
             ops::update_issue(
                 &jira,
                 &key,
@@ -300,14 +307,12 @@ async fn main() -> Result<()> {
             )
             .await?
         }
-        Some(Command::Transition { key, to }) => {
-            ops::transition(&jira, &key, to.as_deref()).await?
-        }
-        Some(Command::Link {
+        Command::Transition { key, to } => ops::transition(&jira, &key, to.as_deref()).await?,
+        Command::Link {
             link_type,
             inward,
             outward,
-        }) => {
+        } => {
             ops::link(
                 &jira,
                 link_type.as_deref(),
@@ -316,16 +321,14 @@ async fn main() -> Result<()> {
             )
             .await?
         }
-        Some(Command::AddLabels { key, label }) => ops::add_labels(&jira, &key, &label).await?,
-        Some(Command::RemoveLabels { key, label }) => {
-            ops::remove_labels(&jira, &key, &label).await?
-        }
-        Some(Command::Attach {
+        Command::AddLabels { key, label } => ops::add_labels(&jira, &key, &label).await?,
+        Command::RemoveLabels { key, label } => ops::remove_labels(&jira, &key, &label).await?,
+        Command::Attach {
             key,
             file,
             filename,
             json,
-        }) => {
+        } => {
             let path = std::path::Path::new(&file);
             let data =
                 std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
@@ -335,15 +338,13 @@ async fn main() -> Result<()> {
                 .unwrap_or("attachment");
             ops::add_attachment(&jira, &key, name, data, json).await?
         }
-        Some(Command::DeleteAttachment { id }) => ops::delete_attachment(&jira, &id).await?,
-        Some(Command::Fields { query }) => ops::fields(&jira, &query).await?,
+        Command::DeleteAttachment { id } => ops::delete_attachment(&jira, &id).await?,
+        Command::Fields { query } => ops::fields(&jira, &query).await?,
         // Handled above, before the config load.
-        Some(
-            Command::WriteConfig
-            | Command::SetToken
-            | Command::DeleteToken
-            | Command::MarkdownToAdf { .. },
-        ) => unreachable!(),
+        Command::WriteConfig
+        | Command::SetToken
+        | Command::DeleteToken
+        | Command::MarkdownToAdf { .. } => unreachable!(),
     };
     println!("{}", out.trim_end());
     Ok(())
@@ -351,7 +352,7 @@ async fn main() -> Result<()> {
 
 async fn serve(jira: Arc<JiraClient>) -> Result<()> {
     // stdout is the MCP transport — anything printed there corrupts the protocol, so logs go to stderr.
-    eprintln!("jira-mcp: serving {} over stdio", jira.config().base);
+    eprintln!("ujira: serving {} over stdio", jira.config().base);
     let service = JiraMcp::new(jira)
         .serve(stdio())
         .await
@@ -384,7 +385,7 @@ fn parse_fields(raw: Option<String>) -> Result<Option<serde_json::Value>> {
 /// Drop the shipped template where [`Config::load`] will find it. Refuses to clobber an existing
 /// file: the whole value of this command is that it's safe to run twice.
 fn write_config() -> Result<()> {
-    let path = jira_mcp::config::config_path().context("no config directory (is HOME set?)")?;
+    let path = ujira::config::config_path().context("no config directory (is HOME set?)")?;
     if path.exists() {
         println!("config already exists at {} (untouched)", path.display());
         return Ok(());
@@ -392,7 +393,7 @@ fn write_config() -> Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     }
-    std::fs::write(&path, jira_mcp::config::default_config_toml())
+    std::fs::write(&path, ujira::config::default_config_toml())
         .with_context(|| format!("writing {}", path.display()))?;
     println!("wrote {}", path.display());
     Ok(())
@@ -403,7 +404,7 @@ fn write_config() -> Result<()> {
 /// stdin rather than an argument on purpose: a token passed as `set-token ATATT…` lands in your
 /// shell history and in `ps` output for every other user on the box.
 fn set_token() -> Result<()> {
-    let account = jira_mcp::config::account()?;
+    let account = ujira::config::account()?;
     if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
         eprintln!("paste the JIRA API token for {account}, then press ctrl-d:");
     }
@@ -413,9 +414,9 @@ fn set_token() -> Result<()> {
     if token.is_empty() {
         anyhow::bail!("no token on stdin");
     }
-    jira_mcp::keychain::set(&account, token)?;
+    ujira::keychain::set(&account, token)?;
     println!("stored the token for {account} in the keychain");
-    println!("verify with: jira-mcp check");
+    println!("verify with: ujira check");
     Ok(())
 }
 

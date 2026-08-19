@@ -1,7 +1,7 @@
 //! The shared operations, once.
 //!
 //! Both front ends are thin over this module: [`crate::server`] wraps each one in an MCP tool, and
-//! the CLI wraps each in a subcommand. Neither owns any logic — an agent scripting `jira-mcp search`
+//! the CLI wraps each in a subcommand. Neither owns any logic — an agent scripting `ujira search`
 //! in a shell and an agent calling `jira_search` over MCP must get byte-identical output, or the
 //! skill that teaches one is lying about the other.
 //!

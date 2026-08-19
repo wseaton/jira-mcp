@@ -33,11 +33,11 @@ jobs:
       - run: cargo build --release --target ${{ matrix.target }}
       # no version in the filename so releases/latest/download URLs stay stable
       - name: package
-        run: tar -czf jira-mcp-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release jira-mcp
+        run: tar -czf ujira-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release ujira
       - uses: actions/upload-artifact@v4
         with:
-          name: jira-mcp-${{ matrix.target }}
-          path: jira-mcp-*.tar.gz
+          name: ujira-${{ matrix.target }}
+          path: ujira-*.tar.gz
 
   release:
     needs: build
@@ -48,4 +48,4 @@ jobs:
           merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
-          files: jira-mcp-*.tar.gz
+          files: ujira-*.tar.gz
