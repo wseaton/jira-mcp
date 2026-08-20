@@ -62,6 +62,7 @@ impl IssueFields {
 }
 
 /// JQL -> one compact line per issue (or the raw rows).
+#[tracing::instrument(level = "debug", skip(jira))]
 pub async fn search(jira: &JiraClient, jql: &str, limit: u32, json_out: bool) -> Result<String> {
     let rows = jira.search(jql, limit).await?;
     Ok(if json_out {
@@ -72,6 +73,7 @@ pub async fn search(jira: &JiraClient, jql: &str, limit: u32, json_out: bool) ->
 }
 
 /// One issue, rendered compact (or raw).
+#[tracing::instrument(level = "debug", skip(jira))]
 pub async fn issue(
     jira: &JiraClient,
     key: &str,
@@ -88,6 +90,7 @@ pub async fn issue(
 }
 
 /// The comment thread, newest `limit`, rendered oldest-first.
+#[tracing::instrument(level = "debug", skip(jira))]
 pub async fn comments(
     jira: &JiraClient,
     key: &str,
@@ -105,6 +108,7 @@ pub async fn comments(
     })
 }
 
+#[tracing::instrument(level = "debug", skip(jira, body))]
 pub async fn add_comment(
     jira: &JiraClient,
     key: &str,
@@ -121,6 +125,7 @@ pub async fn add_comment(
     Ok(format!("commented (id {id}) {}", jira.browse_url(key)))
 }
 
+#[tracing::instrument(level = "debug", skip(jira, fields))]
 pub async fn create_issue(
     jira: &JiraClient,
     project: &str,
@@ -135,7 +140,6 @@ pub async fn create_issue(
         ..fields
     }
     .into_map()?;
-    // When markdown format is requested, convert the description to ADF.
     if prose_format == ProseFormat::Markdown
         && let Some(desc) = m.get("description").and_then(Value::as_str)
     {
@@ -159,6 +163,7 @@ pub async fn create_issue(
     Ok(format!("created {key} {}", jira.browse_url(&key)))
 }
 
+#[tracing::instrument(level = "debug", skip(jira, fields))]
 pub async fn update_issue(
     jira: &JiraClient,
     key: &str,
@@ -182,6 +187,7 @@ pub async fn update_issue(
 }
 
 /// Move an issue by transition/status NAME. `None` lists what's reachable from here.
+#[tracing::instrument(level = "debug", skip(jira))]
 pub async fn transition(jira: &JiraClient, key: &str, to: Option<&str>) -> Result<String> {
     let available = jira.transitions(key).await?;
     let names = || {
@@ -205,6 +211,7 @@ pub async fn transition(jira: &JiraClient, key: &str, to: Option<&str>) -> Resul
 }
 
 /// Link two issues, or list the site's link types when `link_type` is `None`.
+#[tracing::instrument(level = "debug", skip(jira))]
 pub async fn link(
     jira: &JiraClient,
     link_type: Option<&str>,
@@ -222,6 +229,7 @@ pub async fn link(
 }
 
 /// Add labels without replacing the existing set.
+#[tracing::instrument(level = "debug", skip(jira))]
 pub async fn add_labels(jira: &JiraClient, key: &str, labels: &[String]) -> Result<String> {
     if labels.is_empty() {
         bail!("at least one label is required");
@@ -239,6 +247,7 @@ pub async fn add_labels(jira: &JiraClient, key: &str, labels: &[String]) -> Resu
 }
 
 /// Remove specific labels.
+#[tracing::instrument(level = "debug", skip(jira))]
 pub async fn remove_labels(jira: &JiraClient, key: &str, labels: &[String]) -> Result<String> {
     if labels.is_empty() {
         bail!("at least one label is required");
@@ -256,6 +265,7 @@ pub async fn remove_labels(jira: &JiraClient, key: &str, labels: &[String]) -> R
 }
 
 /// Upload a file as an attachment. Returns a one-line summary (or JSON).
+#[tracing::instrument(level = "debug", skip(jira, data))]
 pub async fn add_attachment(
     jira: &JiraClient,
     key: &str,
@@ -281,14 +291,43 @@ pub async fn add_attachment(
 }
 
 /// Delete an attachment by id.
+#[tracing::instrument(level = "debug", skip(jira))]
 pub async fn delete_attachment(jira: &JiraClient, id: &str) -> Result<String> {
     jira.delete_attachment(id).await?;
     Ok(format!("deleted attachment {id}"))
 }
 
 /// Field ids by name substring — how you find the `customfield_NNNNN` for the escape hatch.
+#[tracing::instrument(level = "debug", skip(jira))]
 pub async fn fields(jira: &JiraClient, query: &str) -> Result<String> {
     Ok(render::fields(&jira.fields().await?, query))
+}
+
+/// Users by email, username, or display name -> `accountId  email  name` rows (or raw).
+#[tracing::instrument(level = "debug", skip(jira))]
+pub async fn user_search(
+    jira: &JiraClient,
+    query: &str,
+    limit: u32,
+    json_out: bool,
+) -> Result<String> {
+    let list = jira.user_search(query, limit).await?;
+    Ok(if json_out {
+        dump(&Value::Array(list))
+    } else {
+        render::users(&list)
+    })
+}
+
+/// A project's component names, sorted (or raw).
+#[tracing::instrument(level = "debug", skip(jira))]
+pub async fn components(jira: &JiraClient, project: &str, json_out: bool) -> Result<String> {
+    let list = jira.components(project).await?;
+    Ok(if json_out {
+        dump(&Value::Array(list))
+    } else {
+        render::components(&list)
+    })
 }
 
 /// Set a field only when the caller supplied one — an absent arg must not clear the value in JIRA.

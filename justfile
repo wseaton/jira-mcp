@@ -14,12 +14,12 @@ test:
 
 # Verify credentials resolve and the site answers. Run this FIRST when an install misbehaves.
 check: build
-    ./target/debug/jira-mcp check
+    ./target/debug/ujira check
 
-# Install to ~/.cargo/bin/jira-mcp and seed ~/.config/jira-mcp/config.toml if it's missing.
+# Install to ~/.cargo/bin/ujira and seed ~/.config/ujira/config.toml if it's missing.
 install:
     cargo install --path . --locked
-    jira-mcp write-config
+    ujira write-config
 
 # Drive one tool over a real stdio MCP handshake, e.g.
 #   just smoke jira_get_issue '{"issue_key":"PROJ-142"}'
@@ -33,7 +33,7 @@ compare key: build
 
 # Register with Claude Code at user scope (available in every project).
 claude-install: install
-    claude mcp add --scope user jira -- "$HOME/.cargo/bin/jira-mcp"
+    claude mcp add --scope user jira -- "$HOME/.cargo/bin/ujira"
 
 # Drop the heavyweight Atlassian MCP from Claude Code.
 claude-remove-atlassian:

@@ -83,7 +83,7 @@ Enforced in the client, beneath every operation, so a level cannot be widened by
 
 | Level | Permits |
 | --- | --- |
-| `read-only` | `search`, `issue`, `comments`, `fields` |
+| `read-only` | `search`, `issue`, `comments`, `fields`, `user-search`, `components` |
 | `read-comment` | the above plus `comment` |
 | `read-write` | everything |
 
@@ -105,6 +105,8 @@ Enforced in the client, beneath every operation, so a level cannot be widened by
 | `delete-attachment <ID>` | delete an attachment by id |
 | `markdown-to-adf [TEXT\|-]` | print the ADF JSON for markdown text |
 | `fields [QUERY]` | field ids matching a name substring |
+| `user-search <QUERY> [-l N]` | `accountId  email  displayName` per matching user |
+| `components <PROJECT>` | component names, sorted |
 | `check` | verify credentials, report resolved settings |
 | `write-config` | install the config template; never overwrites |
 | `set-token` / `delete-token` | manage the keychain entry |
@@ -123,7 +125,8 @@ the model acts on.
 
 `jira_search`, `jira_get_issue`, `jira_get_comments`, `jira_add_comment`, `jira_create_issue`,
 `jira_update_issue`, `jira_transition`, `jira_link_issues`, `jira_add_labels`, `jira_remove_labels`,
-`jira_add_attachment`, `jira_delete_attachment`, `jira_markdown_to_adf`, `jira_fields`.
+`jira_add_attachment`, `jira_delete_attachment`, `jira_markdown_to_adf`, `jira_fields`,
+`jira_user_search`, `jira_components`.
 
 Arguments match the commands. Read tools take `format: "json"` and `max_chars`.
 
@@ -177,6 +180,20 @@ println!("{}", render::issue(&issue, jira.config(), 6000));
 `Config::from_env` is strict and reads no files, for a host that injects credentials itself.
 `Config::load` is the layered resolution the binary uses. To expose the full tool surface, serve
 `ujira::JiraMcp`.
+
+The library is instrumented with [`tracing`](https://docs.rs/tracing): a `debug` span per client
+call, op, and MCP tool (issue keys, JQL, limits; never token or prose), a `debug` event per HTTP
+request and response, `warn` on a non-2xx or an access-level refusal, and the token source at
+config load. It never installs a subscriber; the host's does the filtering.
+
+## Logging
+
+Off by default. The CLI installs a subscriber only when `UJIRA_LOG` (or `RUST_LOG`) is set, and
+writes it to stderr, so a plain invocation emits nothing but its answer:
+
+```bash
+UJIRA_LOG=ujira=debug ujira issue PROJ-142    # spans, requests, and the token source on stderr
+```
 
 ## Agent skill
 

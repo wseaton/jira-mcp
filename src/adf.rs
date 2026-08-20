@@ -15,7 +15,6 @@ pub fn markdown_to_adf(markdown: &str) -> Value {
     while i < lines.len() {
         let line = lines[i];
 
-        // Code block
         if let Some(rest) = line.strip_prefix("```") {
             let lang = rest.trim();
             let lang = if lang.is_empty() {
@@ -34,21 +33,18 @@ pub fn markdown_to_adf(markdown: &str) -> Value {
             continue;
         }
 
-        // Heading
         if let Some(h) = parse_heading(line) {
             content.push(h);
             i += 1;
             continue;
         }
 
-        // Horizontal rule
         if is_horizontal_rule(line) {
             content.push(json!({"type": "rule"}));
             i += 1;
             continue;
         }
 
-        // Bullet list
         if is_bullet_start(line) {
             let mut items = Vec::new();
             while i < lines.len() && is_bullet_start(lines[i]) {
@@ -60,7 +56,6 @@ pub fn markdown_to_adf(markdown: &str) -> Value {
             continue;
         }
 
-        // Ordered list
         if is_ordered_start(line) {
             let mut items = Vec::new();
             while i < lines.len() && is_ordered_start(lines[i]) {
@@ -72,7 +67,6 @@ pub fn markdown_to_adf(markdown: &str) -> Value {
             continue;
         }
 
-        // Blockquote
         if line.starts_with("> ") || line == ">" {
             let mut quote_lines = Vec::new();
             while i < lines.len() && (lines[i].starts_with("> ") || lines[i] == ">") {
@@ -112,7 +106,6 @@ pub fn markdown_to_adf(markdown: &str) -> Value {
             let mut table_rows: Vec<Vec<String>> = Vec::new();
             while i < lines.len() && lines[i].starts_with('|') && lines[i].ends_with('|') {
                 let row_text = lines[i].trim();
-                // Skip separator rows (| --- | --- |)
                 if is_table_separator(row_text) {
                     i += 1;
                     continue;
@@ -133,13 +126,11 @@ pub fn markdown_to_adf(markdown: &str) -> Value {
             continue;
         }
 
-        // Empty line
         if line.trim().is_empty() {
             i += 1;
             continue;
         }
 
-        // Paragraph: accumulate consecutive non-empty, non-special lines
         let mut para_lines = Vec::new();
         while i < lines.len()
             && !lines[i].trim().is_empty()
@@ -306,10 +297,8 @@ fn scan_inline(text: &str, nodes: &mut Vec<Value>) {
     let len = text.len();
 
     while pos < len {
-        // Find the next inline pattern
         let mut earliest: Option<(usize, usize, Value)> = None; // (start, end, node)
 
-        // **bold**
         if let Some(m) = find_delimited(text, pos, "**", "**")
             && (earliest.is_none() || m.0 < earliest.as_ref().map(|e| e.0).unwrap_or(usize::MAX))
         {
@@ -321,7 +310,6 @@ fn scan_inline(text: &str, nodes: &mut Vec<Value>) {
             ));
         }
 
-        // ~~strike~~
         if let Some(m) = find_delimited(text, pos, "~~", "~~")
             && (earliest.is_none() || m.0 < earliest.as_ref().map(|e| e.0).unwrap_or(usize::MAX))
         {
@@ -333,7 +321,6 @@ fn scan_inline(text: &str, nodes: &mut Vec<Value>) {
             ));
         }
 
-        // *italic* (but not **)
         if let Some(m) = find_single_star_italic(text, pos)
             && (earliest.is_none() || m.0 < earliest.as_ref().map(|e| e.0).unwrap_or(usize::MAX))
         {
@@ -341,7 +328,6 @@ fn scan_inline(text: &str, nodes: &mut Vec<Value>) {
             earliest = Some((m.0, m.1, adf_text(inner, Some(vec![json!({"type": "em"})]))));
         }
 
-        // `code`
         if let Some(m) = find_backtick_code(text, pos)
             && (earliest.is_none() || m.0 < earliest.as_ref().map(|e| e.0).unwrap_or(usize::MAX))
         {
@@ -353,7 +339,6 @@ fn scan_inline(text: &str, nodes: &mut Vec<Value>) {
             ));
         }
 
-        // [text](url)
         if let Some(m) = find_link(text, pos)
             && (earliest.is_none() || m.0 < earliest.as_ref().map(|e| e.0).unwrap_or(usize::MAX))
         {
@@ -369,7 +354,6 @@ fn scan_inline(text: &str, nodes: &mut Vec<Value>) {
                 pos = end;
             }
             None => {
-                // No more patterns; emit the rest as plain text
                 if pos < len {
                     nodes.push(adf_text(&text[pos..], None));
                 }
@@ -398,12 +382,10 @@ fn find_single_star_italic(text: &str, from: usize) -> Option<(usize, usize)> {
     let mut search_from = from;
     loop {
         let start = text[search_from..].find('*').map(|i| i + search_from)?;
-        // Skip if this is the start of **
         if text[start..].starts_with("**") {
             search_from = start + 2;
             continue;
         }
-        // Find closing * that isn't **
         let after = start + 1;
         if after >= text.len() {
             return None;
@@ -411,7 +393,6 @@ fn find_single_star_italic(text: &str, from: usize) -> Option<(usize, usize)> {
         let mut end_search = after;
         loop {
             let close = text[end_search..].find('*').map(|i| i + end_search)?;
-            // Make sure the close * isn't part of **
             if close + 1 < text.len() && text.as_bytes()[close + 1] == b'*' {
                 end_search = close + 2;
                 continue;

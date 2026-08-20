@@ -51,6 +51,7 @@ impl JiraClient {
     /// present or future.
     fn require(&self, need: Access) -> Result<()> {
         if !self.cfg.access.allows(need) {
+            tracing::warn!(configured = %self.cfg.access, required = %need, "refusing a call the access level does not allow");
             bail!(
                 "this ujira client is configured {} — {need} is required for that call",
                 self.cfg.access
@@ -60,6 +61,7 @@ impl JiraClient {
     }
 
     /// JQL search. Returns the raw `issues` array (rendering is the caller's job).
+    #[tracing::instrument(level = "debug", skip(self), err)]
     pub async fn search(&self, jql: &str, limit: u32) -> Result<Vec<Value>> {
         let body = json!({"jql": jql, "maxResults": limit.clamp(1, 100), "fields": SEARCH_FIELDS});
         let v = self
@@ -76,6 +78,7 @@ impl JiraClient {
     }
 
     /// One issue, plus its links and (optionally) its comments. `/rest/api/2` for plain-text prose.
+    #[tracing::instrument(level = "debug", skip(self), err)]
     pub async fn get_issue(&self, key: &str, with_comments: bool) -> Result<Value> {
         // Comments cost a page of prose each, so they're opt-in: `*all,-comment` is api/2's
         // "everything except" selector.
@@ -89,6 +92,7 @@ impl JiraClient {
     }
 
     /// The newest `limit` comments on an issue.
+    #[tracing::instrument(level = "debug", skip(self), err)]
     pub async fn get_comments(&self, key: &str, limit: u32) -> Result<Vec<Value>> {
         let path = format!(
             "/rest/api/2/issue/{key}/comment?orderBy=-created&maxResults={}",
@@ -104,6 +108,7 @@ impl JiraClient {
     }
 
     /// Post a comment with an ADF body (api/v3). Returns the new comment id.
+    #[tracing::instrument(level = "debug", skip(self, body_adf), err)]
     pub async fn add_comment_adf(&self, key: &str, body_adf: Value) -> Result<String> {
         self.require(Access::ReadComment)?;
         let v = self
@@ -120,6 +125,7 @@ impl JiraClient {
     }
 
     /// Post a plain-text comment. Returns the new comment id.
+    #[tracing::instrument(level = "debug", skip(self, body), err)]
     pub async fn add_comment(&self, key: &str, body: &str) -> Result<String> {
         self.require(Access::ReadComment)?;
         let v = self
@@ -136,6 +142,7 @@ impl JiraClient {
     }
 
     /// Create an issue from an already-assembled `fields` object. Returns the new key.
+    #[tracing::instrument(level = "debug", skip(self, fields), err)]
     pub async fn create_issue(&self, fields: Map<String, Value>) -> Result<String> {
         self.require(Access::ReadWrite)?;
         let v = self
@@ -152,6 +159,7 @@ impl JiraClient {
     }
 
     /// Create an issue via api/v3 (accepts ADF in description). Returns the new key.
+    #[tracing::instrument(level = "debug", skip(self, fields), err)]
     pub async fn create_issue_v3(&self, fields: Map<String, Value>) -> Result<String> {
         self.require(Access::ReadWrite)?;
         let v = self
@@ -168,6 +176,7 @@ impl JiraClient {
     }
 
     /// Edit an issue's fields in place. A 204 carries no body, so there's nothing to return.
+    #[tracing::instrument(level = "debug", skip(self, fields), err)]
     pub async fn update_issue(&self, key: &str, fields: Map<String, Value>) -> Result<()> {
         self.require(Access::ReadWrite)?;
         self.send(
@@ -180,6 +189,7 @@ impl JiraClient {
     }
 
     /// Edit an issue's fields via api/v3 (accepts ADF values for description/comment bodies).
+    #[tracing::instrument(level = "debug", skip(self, fields), err)]
     pub async fn update_issue_v3(&self, key: &str, fields: Map<String, Value>) -> Result<()> {
         self.require(Access::ReadWrite)?;
         self.send(
@@ -192,6 +202,7 @@ impl JiraClient {
     }
 
     /// The transitions available from the issue's current status, as `(id, name)`.
+    #[tracing::instrument(level = "debug", skip(self), err)]
     pub async fn transitions(&self, key: &str) -> Result<Vec<(String, String)>> {
         let v = self
             .send(
@@ -213,6 +224,7 @@ impl JiraClient {
     }
 
     /// Drive a transition by id (resolve the name first with [`Self::transitions`]).
+    #[tracing::instrument(level = "debug", skip(self), err)]
     pub async fn transition(&self, key: &str, id: &str) -> Result<()> {
         self.require(Access::ReadWrite)?;
         self.send(
@@ -228,6 +240,7 @@ impl JiraClient {
     }
 
     /// Link two issues: `inward` <-link type-> `outward` (e.g. Blocks: inward blocks outward).
+    #[tracing::instrument(level = "debug", skip(self), err)]
     pub async fn link(&self, link_type: &str, inward: &str, outward: &str) -> Result<()> {
         self.require(Access::ReadWrite)?;
         self.send(
@@ -244,6 +257,7 @@ impl JiraClient {
     }
 
     /// The site's link type names (the only legal values for `jira_link_issues`).
+    #[tracing::instrument(level = "debug", skip(self), err)]
     pub async fn link_types(&self) -> Result<Vec<Value>> {
         let v = self
             .send(
@@ -258,6 +272,7 @@ impl JiraClient {
     }
 
     /// Incremental label add: appends without replacing the existing set.
+    #[tracing::instrument(level = "debug", skip(self), err)]
     pub async fn add_labels(&self, key: &str, labels: &[String]) -> Result<()> {
         self.require(Access::ReadWrite)?;
         let ops: Vec<Value> = labels.iter().map(|l| json!({"add": l})).collect();
@@ -271,6 +286,7 @@ impl JiraClient {
     }
 
     /// Incremental label remove: drops specific labels without touching the rest.
+    #[tracing::instrument(level = "debug", skip(self), err)]
     pub async fn remove_labels(&self, key: &str, labels: &[String]) -> Result<()> {
         self.require(Access::ReadWrite)?;
         let ops: Vec<Value> = labels.iter().map(|l| json!({"remove": l})).collect();
@@ -284,6 +300,7 @@ impl JiraClient {
     }
 
     /// Upload a file attachment. Returns the attachment JSON array from JIRA.
+    #[tracing::instrument(level = "debug", skip(self, data), err)]
     pub async fn add_attachment(&self, key: &str, filename: &str, data: Vec<u8>) -> Result<Value> {
         self.require(Access::ReadWrite)?;
         let part = reqwest::multipart::Part::bytes(data)
@@ -304,6 +321,7 @@ impl JiraClient {
     }
 
     /// Delete an attachment by id.
+    #[tracing::instrument(level = "debug", skip(self), err)]
     pub async fn delete_attachment(&self, id: &str) -> Result<()> {
         self.require(Access::ReadWrite)?;
         self.send(
@@ -319,6 +337,7 @@ impl JiraClient {
 
     /// Every field on the site (id + name + custom flag) — the lookup behind `jira_fields`, which is
     /// how you find the `customfield_NNNNN` to pass to create/update.
+    #[tracing::instrument(level = "debug", skip(self), err)]
     pub async fn fields(&self) -> Result<Vec<Value>> {
         let v = self
             .send(
@@ -329,16 +348,55 @@ impl JiraClient {
         Ok(v.as_array().cloned().unwrap_or_default())
     }
 
+    /// Users matching an email, username, or display name. Raw user objects.
+    #[tracing::instrument(level = "debug", skip(self), err)]
+    pub async fn user_search(&self, query: &str, limit: u32) -> Result<Vec<Value>> {
+        let v = self
+            .send(
+                self.req(reqwest::Method::GET, "/rest/api/2/user/search")
+                    .query(&[
+                        ("query", query),
+                        ("maxResults", &limit.clamp(1, 1000).to_string()),
+                    ]),
+                "user_search",
+            )
+            .await?;
+        Ok(v.as_array().cloned().unwrap_or_default())
+    }
+
+    /// A project's components. Raw component objects.
+    #[tracing::instrument(level = "debug", skip(self), err)]
+    pub async fn components(&self, project: &str) -> Result<Vec<Value>> {
+        let v = self
+            .send(
+                self.req(
+                    reqwest::Method::GET,
+                    &format!("/rest/api/2/project/{project}/components"),
+                ),
+                "components",
+            )
+            .await?;
+        Ok(v.as_array().cloned().unwrap_or_default())
+    }
+
     /// Send, then map a non-2xx to an error carrying the (truncated) body. A 204/empty body becomes
     /// `null` rather than a parse error, which is what the write endpoints return.
     async fn send(&self, req: reqwest::RequestBuilder, what: &str) -> Result<Value> {
-        let resp = req
-            .send()
+        let req = req
+            .build()
+            .with_context(|| format!("building the jira {what} request"))?;
+        tracing::debug!(what, method = %req.method(), url = %req.url(), "jira request");
+        let resp = self
+            .http
+            .execute(req)
             .await
             .with_context(|| format!("jira {what} request"))?;
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        if !status.is_success() {
+        if status.is_success() {
+            tracing::debug!(what, %status, bytes = text.len(), "jira response");
+        } else {
+            tracing::warn!(what, %status, body = %truncate(&text, 400), "jira request failed");
             bail!("jira {what} failed ({status}): {}", truncate(&text, 400));
         }
         if text.trim().is_empty() {

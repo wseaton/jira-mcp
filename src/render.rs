@@ -137,6 +137,31 @@ pub fn fields(all: &[Value], query: &str) -> String {
     format!("{n} fields\n{out}")
 }
 
+/// `accountId  emailAddress  displayName` per user, for `jira_user_search`.
+pub fn users(list: &[Value]) -> String {
+    let mut out = String::new();
+    for u in list {
+        out.push_str(&format!(
+            "{}  {}  {}\n",
+            ptr(Some(u), "/accountId"),
+            ptr(Some(u), "/emailAddress"),
+            ptr(Some(u), "/displayName")
+        ));
+    }
+    out
+}
+
+/// One component name per line, sorted, for `jira_components`.
+pub fn components(list: &[Value]) -> String {
+    let mut names: Vec<String> = list.iter().map(|c| ptr(Some(c), "/name")).collect();
+    names.sort_unstable();
+    let mut out = names.join("\n");
+    if !out.is_empty() {
+        out.push('\n');
+    }
+    out
+}
+
 /// Append `key: value` when the value is non-empty.
 fn line(out: &mut String, key: &str, value: &str) {
     if !value.is_empty() {
@@ -439,5 +464,26 @@ mod tests {
             out,
             "## comments (1)\n- 2026-07-02 Jo Park: looks good\n\nship it\n"
         );
+    }
+
+    #[test]
+    fn users_render_one_row_per_match_with_missing_fields_blank() {
+        let out = users(&[
+            json!({"accountId": "5b1", "emailAddress": "jo@x", "displayName": "Jo Park"}),
+            json!({"accountId": "5b2", "displayName": "Hidden Email"}),
+        ]);
+        assert_eq!(out, "5b1  jo@x  Jo Park\n5b2    Hidden Email\n");
+        assert_eq!(users(&[]), "");
+    }
+
+    #[test]
+    fn components_render_sorted_names() {
+        let out = components(&[
+            json!({"id": "2", "name": "gateway"}),
+            json!({"id": "1", "name": "Auth"}),
+            json!({"id": "3", "name": "cache"}),
+        ]);
+        assert_eq!(out, "Auth\ncache\ngateway\n");
+        assert_eq!(components(&[]), "");
     }
 }

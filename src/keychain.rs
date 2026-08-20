@@ -25,7 +25,18 @@ mod imp {
     pub fn get(account: &str) -> Option<String> {
         [crate::keychain::SERVICE, crate::keychain::LEGACY_SERVICE]
             .iter()
-            .find_map(|service| entry(service, account).ok()?.get_password().ok())
+            .find_map(
+                |service| match entry(service, account).ok()?.get_password() {
+                    Ok(t) => {
+                        tracing::debug!(service, account, "keychain hit");
+                        Some(t)
+                    }
+                    Err(e) => {
+                        tracing::debug!(service, account, error = %e, "keychain miss");
+                        None
+                    }
+                },
+            )
     }
 
     pub fn set(account: &str, token: &str) -> Result<()> {

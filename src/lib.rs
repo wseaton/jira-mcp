@@ -26,7 +26,15 @@
 //! # }
 //! ```
 //!
-//! To expose this crate's full fourteen-tool surface instead, serve [`server::JiraMcp`] directly.
+//! To expose this crate's full sixteen-tool surface instead, serve [`server::JiraMcp`] directly.
+//!
+//! # Instrumentation
+//!
+//! Every client call, op, and MCP tool opens a `debug` [`tracing`] span carrying its identifiers
+//! (issue key, JQL, limits) and never the token or prose bodies. The HTTP boundary emits a `debug`
+//! event per request and response, a `warn` on a non-2xx or an access-level refusal, and config
+//! resolution reports which token source won. The library installs no subscriber; the host decides
+//! where, and whether, any of it goes.
 
 pub mod adf;
 pub mod client;
