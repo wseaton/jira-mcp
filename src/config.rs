@@ -156,6 +156,7 @@ impl Config {
     /// The full layered resolution used by the binary: env > config file > compiled-in defaults,
     /// with the jira-cli config as a last resort for the site and login.
     pub fn load() -> Result<Self> {
+        tracing::debug!(path = ?config_path(), "loading config");
         Self::resolve(&file_config()?, &defaults())
     }
 
@@ -173,6 +174,7 @@ impl Config {
             .or_else(|| cli_config_value("login"))
             .context("no JIRA account email: set JIRA_USERNAME or `username` in the config file")?;
         let (token, token_source) = resolve_token(file, defaults, &email)?;
+        tracing::debug!(site = %base, account = %email, token = %token_source, "config resolved");
         let custom_fields = file
             .custom_fields
             .clone()
@@ -207,11 +209,12 @@ fn resolve_token(file: &File, defaults: &File, account: &str) -> Result<(String,
         .or(file.keychain)
         .or(defaults.keychain)
         .unwrap_or(true);
-    if use_keychain
-        && let Some(t) = crate::keychain::get(account)
-        && !t.trim().is_empty()
-    {
-        return Ok((t, TokenSource::Keychain));
+    if use_keychain {
+        match crate::keychain::get(account) {
+            Some(t) if !t.trim().is_empty() => return Ok((t, TokenSource::Keychain)),
+            Some(_) => tracing::debug!(account, "keychain entry is empty, trying the next source"),
+            None => tracing::debug!(account, "no keychain entry, trying the next source"),
+        }
     }
     let path = env("JIRA_API_TOKEN_FILE")
         .or_else(|| file.token_file.clone())
@@ -224,8 +227,10 @@ fn resolve_token(file: &File, defaults: &File, account: &str) -> Result<(String,
                 let token = non_empty(text.trim(), &format!("token file {}", path.display()))?;
                 return Ok((token, TokenSource::File(path)));
             }
-            // Not fatal yet: an inline token may still be waiting below.
-            Err(e) => file_err = Some((path, e)),
+            Err(e) => {
+                tracing::debug!(path = %path.display(), error = %e, "token file unreadable, trying the inline token");
+                file_err = Some((path, e));
+            }
         }
     }
     if let Some(t) = &file.token {
@@ -258,7 +263,7 @@ fn non_empty(s: &str, what: &str) -> Result<String> {
 /// so it degrades to "no defaults" rather than taking the server down.
 fn defaults() -> File {
     toml::from_str(DEFAULTS).unwrap_or_else(|e| {
-        eprintln!("ujira: built-in defaults are malformed ({e}); continuing without them");
+        tracing::warn!(error = %e, "built-in defaults are malformed; continuing without them");
         File::default()
     })
 }
@@ -320,7 +325,7 @@ fn env(key: &str) -> Option<String> {
 fn legacy_read_only(file: &File) -> Option<Access> {
     match file.read_only? {
         true => {
-            eprintln!("ujira: `read_only` is deprecated; use `access = \"read-only\"`");
+            tracing::warn!("`read_only` is deprecated; use `access = \"read-only\"`");
             Some(Access::ReadOnly)
         }
         false => None,
@@ -337,7 +342,10 @@ fn env_access() -> Option<Access> {
             "read-comment" => Access::ReadComment,
             "read-only" => Access::ReadOnly,
             other => {
-                eprintln!("ujira: unknown access level {other:?}; falling back to read-only");
+                tracing::warn!(
+                    access = other,
+                    "unknown access level; falling back to read-only"
+                );
                 Access::ReadOnly
             }
         });

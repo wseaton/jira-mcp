@@ -1,4 +1,4 @@
-//! The MCP tool surface: fourteen tools.
+//! The MCP tool surface: sixteen tools.
 //!
 //! Tool *descriptions* are themselves context the model pays for on every single turn, so they're
 //! terse on purpose. The full-fat Atlassian MCP spends tens of thousands of tokens announcing tools
@@ -220,6 +220,27 @@ pub struct FieldsArgs {
     pub query: String,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct UserSearchArgs {
+    /// Email, username, or display name (substring match).
+    pub query: String,
+    /// Max users, 1 to 1000. Default 25.
+    #[serde(default = "default_limit")]
+    pub limit: u32,
+    /// `text` (default, `accountId  email  name` rows) or `json` (raw user objects).
+    #[serde(default = "default_format")]
+    pub format: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ComponentsArgs {
+    /// Project key, e.g. `PROJ`.
+    pub project: String,
+    /// `text` (default, one sorted name per line) or `json` (raw component objects).
+    #[serde(default = "default_format")]
+    pub format: String,
+}
+
 /// The MCP server. One shared [`JiraClient`]; every tool is a thin call + render.
 #[derive(Clone)]
 pub struct JiraMcp {
@@ -240,6 +261,7 @@ impl JiraMcp {
         description = "Search JIRA by JQL. Returns one compact line per issue: KEY [Type/Status] \
         Summary @assignee #labels. Use jira_get_issue for detail."
     )]
+    #[tracing::instrument(level = "debug", skip_all)]
     async fn jira_search(&self, Parameters(a): Parameters<SearchArgs>) -> String {
         flatten(ops::search(&self.jira, &a.jql, a.limit, json_wanted(&a.format)).await)
     }
@@ -249,6 +271,7 @@ impl JiraMcp {
         custom fields (nulls dropped), then the description. Set comments=true for the thread, \
         format=json for every raw field."
     )]
+    #[tracing::instrument(level = "debug", skip_all)]
     async fn jira_get_issue(&self, Parameters(a): Parameters<GetIssueArgs>) -> String {
         flatten(
             ops::issue(
@@ -263,6 +286,7 @@ impl JiraMcp {
     }
 
     #[tool(description = "Read an issue's comment thread (newest N, rendered oldest-first).")]
+    #[tracing::instrument(level = "debug", skip_all)]
     async fn jira_get_comments(&self, Parameters(a): Parameters<GetCommentsArgs>) -> String {
         flatten(
             ops::comments(
@@ -280,6 +304,7 @@ impl JiraMcp {
         description = "Post a comment. Set description_format='markdown' for rich formatting \
         (headings, bold, code blocks, tables, links)."
     )]
+    #[tracing::instrument(level = "debug", skip_all)]
     async fn jira_add_comment(&self, Parameters(a): Parameters<AddCommentArgs>) -> String {
         let prose = match a.description_format.parse() {
             Ok(p) => p,
@@ -290,6 +315,7 @@ impl JiraMcp {
 
     #[tool(description = "Create an issue. Returns the new key and url. Set \
         description_format='markdown' for rich description formatting.")]
+    #[tracing::instrument(level = "debug", skip_all)]
     async fn jira_create_issue(&self, Parameters(a): Parameters<CreateIssueArgs>) -> String {
         let prose = match a.description_format.parse() {
             Ok(p) => p,
@@ -318,6 +344,7 @@ impl JiraMcp {
         description = "Edit an issue's fields in place. Set description_format='markdown' for \
         rich description formatting."
     )]
+    #[tracing::instrument(level = "debug", skip_all)]
     async fn jira_update_issue(&self, Parameters(a): Parameters<UpdateIssueArgs>) -> String {
         let prose = match a.description_format.parse() {
             Ok(p) => p,
@@ -343,6 +370,7 @@ impl JiraMcp {
         description = "Move an issue to another status by transition/status name. Omit `to` to list \
         the transitions available from the current status."
     )]
+    #[tracing::instrument(level = "debug", skip_all)]
     async fn jira_transition(&self, Parameters(a): Parameters<TransitionArgs>) -> String {
         flatten(ops::transition(&self.jira, &a.issue_key, a.to.as_deref()).await)
     }
@@ -351,6 +379,7 @@ impl JiraMcp {
         description = "Link two issues (inward_key <link_type> outward_key). Omit `link_type` to \
         list the site's link types with their direction words."
     )]
+    #[tracing::instrument(level = "debug", skip_all)]
     async fn jira_link_issues(&self, Parameters(a): Parameters<LinkArgs>) -> String {
         flatten(
             ops::link(
@@ -364,11 +393,13 @@ impl JiraMcp {
     }
 
     #[tool(description = "Add labels to an issue without removing existing ones.")]
+    #[tracing::instrument(level = "debug", skip_all)]
     async fn jira_add_labels(&self, Parameters(a): Parameters<AddLabelsArgs>) -> String {
         flatten(ops::add_labels(&self.jira, &a.issue_key, &a.labels).await)
     }
 
     #[tool(description = "Remove specific labels from an issue.")]
+    #[tracing::instrument(level = "debug", skip_all)]
     async fn jira_remove_labels(&self, Parameters(a): Parameters<RemoveLabelsArgs>) -> String {
         flatten(ops::remove_labels(&self.jira, &a.issue_key, &a.labels).await)
     }
@@ -377,6 +408,7 @@ impl JiraMcp {
         description = "Upload a file attachment to an issue. Pass content as UTF-8 text, or \
         base64-encode binary content and set encoding='base64'."
     )]
+    #[tracing::instrument(level = "debug", skip_all)]
     async fn jira_add_attachment(&self, Parameters(a): Parameters<AddAttachmentArgs>) -> String {
         let data = if a.encoding.eq_ignore_ascii_case("base64") {
             use ::base64::Engine;
@@ -400,6 +432,7 @@ impl JiraMcp {
     }
 
     #[tool(description = "Delete an attachment by id.")]
+    #[tracing::instrument(level = "debug", skip_all)]
     async fn jira_delete_attachment(
         &self,
         Parameters(a): Parameters<DeleteAttachmentArgs>,
@@ -412,6 +445,7 @@ impl JiraMcp {
         to build ADF for the `fields` escape hatch (e.g. setting description via raw fields on \
         api/v3). For most cases, use description_format='markdown' on create/update/comment instead."
     )]
+    #[tracing::instrument(level = "debug", skip_all)]
     async fn jira_markdown_to_adf(&self, Parameters(a): Parameters<MarkdownToAdfArgs>) -> String {
         let adf = crate::adf::markdown_to_adf(&a.markdown);
         serde_json::to_string(&adf).unwrap_or_else(|e| format!("error: {e}"))
@@ -421,8 +455,24 @@ impl JiraMcp {
         description = "Look up field ids by name (e.g. 'team' -> customfield_10001) for the `fields` \
         escape hatch on create/update."
     )]
+    #[tracing::instrument(level = "debug", skip_all)]
     async fn jira_fields(&self, Parameters(a): Parameters<FieldsArgs>) -> String {
         flatten(ops::fields(&self.jira, &a.query).await)
+    }
+
+    #[tool(
+        description = "Find users by email, username, or display name. Returns `accountId  email  \
+        displayName` per match; use the accountId for reporter/assignee fields."
+    )]
+    #[tracing::instrument(level = "debug", skip_all)]
+    async fn jira_user_search(&self, Parameters(a): Parameters<UserSearchArgs>) -> String {
+        flatten(ops::user_search(&self.jira, &a.query, a.limit, json_wanted(&a.format)).await)
+    }
+
+    #[tool(description = "List a project's components, one name per line, sorted.")]
+    #[tracing::instrument(level = "debug", skip_all)]
+    async fn jira_components(&self, Parameters(a): Parameters<ComponentsArgs>) -> String {
+        flatten(ops::components(&self.jira, &a.project, json_wanted(&a.format)).await)
     }
 }
 
@@ -482,7 +532,7 @@ mod tests {
             .into_iter()
             .map(|t| t.name.to_string())
             .collect();
-        assert_eq!(names.len(), 14, "tools: {names:?}");
+        assert_eq!(names.len(), 16, "tools: {names:?}");
         assert!(names.contains(&"jira_get_issue".to_string()), "{names:?}");
         assert!(names.contains(&"jira_add_labels".to_string()), "{names:?}");
         assert!(
@@ -493,5 +543,7 @@ mod tests {
             names.contains(&"jira_markdown_to_adf".to_string()),
             "{names:?}"
         );
+        assert!(names.contains(&"jira_user_search".to_string()), "{names:?}");
+        assert!(names.contains(&"jira_components".to_string()), "{names:?}");
     }
 }

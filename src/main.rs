@@ -1,8 +1,8 @@
-//! `ujira` — a small MCP server for JIRA Cloud, and the same fourteen tools as a CLI.
+//! `ujira` — a small MCP server for JIRA Cloud, and the same sixteen tools as a CLI.
 //!
 //! Why it exists: the official Atlassian MCP announces ~40 tools and answers in raw JIRA JSON, which
 //! together cost tens of thousands of context tokens before you've read a single ticket. This one
-//! carries fourteen tools and renders compact text (see [`ujira::render`]).
+//! carries sixteen tools and renders compact text (see [`ujira::render`]).
 //!
 //! `ujira mcp serve` serves MCP over stdio, which is how a client launches it. Every other subcommand
 //! is the same operation an MCP tool exposes, over the same [`ujira::ops`] code, printing the same
@@ -202,6 +202,27 @@ enum Command {
         #[arg(default_value = "")]
         query: String,
     },
+
+    /// Find users by email, username, or display name. One `accountId  email  name` line per match.
+    UserSearch {
+        /// Email, username, or display name (substring match).
+        query: String,
+        /// Max users (clamped to [1,1000]).
+        #[arg(short, long, default_value_t = 25)]
+        limit: u32,
+        /// Print the raw JIRA user objects instead of the compact rendering.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// List a project's components, one name per line, sorted.
+    Components {
+        /// Project key, e.g. PROJ.
+        project: String,
+        /// Print the raw JIRA component objects instead of the names.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -212,6 +233,7 @@ enum McpCommand {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    init_tracing();
     let cli = Cli::parse();
 
     // These three run BEFORE config resolution: each exists to fix a config that doesn't load yet,
@@ -340,7 +362,10 @@ async fn main() -> Result<()> {
         }
         Command::DeleteAttachment { id } => ops::delete_attachment(&jira, &id).await?,
         Command::Fields { query } => ops::fields(&jira, &query).await?,
-        // Handled above, before the config load.
+        Command::UserSearch { query, limit, json } => {
+            ops::user_search(&jira, &query, limit, json).await?
+        }
+        Command::Components { project, json } => ops::components(&jira, &project, json).await?,
         Command::WriteConfig
         | Command::SetToken
         | Command::DeleteToken
@@ -351,14 +376,37 @@ async fn main() -> Result<()> {
 }
 
 async fn serve(jira: Arc<JiraClient>) -> Result<()> {
-    // stdout is the MCP transport — anything printed there corrupts the protocol, so logs go to stderr.
-    eprintln!("ujira: serving {} over stdio", jira.config().base);
+    tracing::info!(site = %jira.config().base, "serving MCP over stdio");
     let service = JiraMcp::new(jira)
         .serve(stdio())
         .await
         .context("starting the MCP stdio service")?;
     service.waiting().await.context("serving MCP over stdio")?;
     Ok(())
+}
+
+/// Opt-in only: with neither `UJIRA_LOG` nor `RUST_LOG` set, no subscriber is installed and the
+/// binary writes nothing but its answer. An agent running `ujira` inside a skill captures stderr
+/// along with stdout, so any default-on log line would land in its context.
+///
+/// When enabled, output goes to stderr: stdout is the MCP transport under `mcp serve`, and the
+/// pipeable answer everywhere else.
+fn init_tracing() {
+    let Some(filter) = std::env::var("UJIRA_LOG")
+        .or_else(|_| std::env::var("RUST_LOG"))
+        .ok()
+        .filter(|f| !f.trim().is_empty())
+    else {
+        return;
+    };
+    match tracing_subscriber::EnvFilter::try_new(&filter) {
+        Ok(filter) => tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_writer(std::io::stderr)
+            .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stderr()))
+            .init(),
+        Err(e) => eprintln!("ujira: ignoring invalid log filter {filter:?}: {e}"),
+    }
 }
 
 /// `-` means "read it from stdin", the usual convention, and the only sane way to pass a multi-line

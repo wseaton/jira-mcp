@@ -1,11 +1,11 @@
 ---
 name: jira
-description: Read and write JIRA Cloud issues from the shell with the ujira CLI — search by JQL, read issues and comment threads, comment, create, update, transition, link, manage labels, and attach files. Use when a task involves JIRA tickets, requirements written in an issue, sprint or backlog state, or when you need to leave a comment or file an issue. Output is compact plain text built for reading in context, and the same fourteen operations are available as MCP tools.
+description: Read and write JIRA Cloud issues from the shell with the ujira CLI — search by JQL, read issues and comment threads, comment, create, update, transition, link, manage labels, and attach files. Use when a task involves JIRA tickets, requirements written in an issue, sprint or backlog state, or when you need to leave a comment or file an issue. Output is compact plain text built for reading in context, and the same sixteen operations are available as MCP tools.
 ---
 
 # Work JIRA from the shell
 
-`ujira` is both an MCP server and a CLI over the same fourteen operations, printing
+`ujira` is both an MCP server and a CLI over the same sixteen operations, printing
 the same bytes either way. Reach for the CLI when you want to **script** JIRA:
 loop over keys, pipe into grep, pull one field out of thirty issues. Reach for the
 MCP tools when you want a single lookup mid-conversation.
@@ -143,6 +143,8 @@ merged last and can override them:
 
 ```bash
 ujira fields team                      # -> customfield_10001  Team
+ujira user-search jo@example.com       # -> accountId  email  displayName
+ujira components PROJ                  # one component name per line
 ujira create -p PROJ -t Story -s 'x' --fields '{"customfield_10001":{"id":"42"}}'
 ```
 
@@ -158,3 +160,6 @@ ujira create -p PROJ -t Story -s 'x' --fields '{"customfield_10001":{"id":"42"}}
   `remove-labels` to edit incrementally.
 - **A create is hard to take back.** Confirm the project and issue type with the user
   when you're inferring them rather than being told.
+- **Leave `UJIRA_LOG` / `RUST_LOG` unset.** Logging is off by default so the only bytes
+  you read are the answer. Set `UJIRA_LOG=ujira=debug` only to debug a failing call, and
+  expect the stderr noise in your context when you do.
