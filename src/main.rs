@@ -30,6 +30,10 @@ enum Command {
     #[command(subcommand)]
     Mcp(McpCommand),
 
+    /// Manage this ujira install.
+    #[command(name = "self", subcommand)]
+    SelfCmd(SelfCommand),
+
     /// Verify credentials against the live site and report where each setting came from.
     Check,
 
@@ -231,13 +235,26 @@ enum McpCommand {
     Serve,
 }
 
+#[derive(Subcommand)]
+enum SelfCommand {
+    /// Replace this binary with a GitHub release build (latest by default).
+    Update {
+        /// Exact version to install, e.g. 0.8.0. Defaults to the latest release.
+        #[arg(long)]
+        version: Option<String>,
+        /// Resolve the release and report what would change without touching anything.
+        #[arg(long)]
+        dry_run: bool,
+    },
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     init_tracing();
     let cli = Cli::parse();
 
-    // These three run BEFORE config resolution: each exists to fix a config that doesn't load yet,
-    // so requiring a working one would be a circle.
+    // These run BEFORE config resolution: each exists to fix a config that doesn't load yet (or
+    // needs no JIRA at all), so requiring a working one would be a circle.
     match &cli.command {
         Command::WriteConfig => return write_config(),
         Command::SetToken => return set_token(),
@@ -245,6 +262,11 @@ async fn main() -> Result<()> {
             let account = ujira::config::account()?;
             ujira::keychain::delete(&account)?;
             println!("removed the token for {account} from the keychain");
+            return Ok(());
+        }
+        Command::SelfCmd(SelfCommand::Update { version, dry_run }) => {
+            let out = ujira::selfupdate::update(version.as_deref(), *dry_run).await?;
+            println!("{out}");
             return Ok(());
         }
         Command::MarkdownToAdf { input } => {
@@ -366,7 +388,8 @@ async fn main() -> Result<()> {
             ops::user_search(&jira, &query, limit, json).await?
         }
         Command::Components { project, json } => ops::components(&jira, &project, json).await?,
-        Command::WriteConfig
+        Command::SelfCmd(_)
+        | Command::WriteConfig
         | Command::SetToken
         | Command::DeleteToken
         | Command::MarkdownToAdf { .. } => unreachable!(),

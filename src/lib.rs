@@ -42,6 +42,7 @@ pub mod config;
 pub mod keychain;
 pub mod ops;
 pub mod render;
+pub mod selfupdate;
 pub mod server;
 
 pub use client::JiraClient;

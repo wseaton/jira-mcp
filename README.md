@@ -111,6 +111,7 @@ Enforced in the client, beneath every operation, so a level cannot be widened by
 | `write-config` | install the config template; never overwrites |
 | `set-token` / `delete-token` | manage the keychain entry |
 | `mcp serve` | serve MCP over stdio |
+| `self update [--version X.Y.Z] [--dry-run]` | replace this binary with a release build, sha256-verified |
 
 `--fields` is merged last and overrides typed flags. `-l/--label` on `update` replaces the label set
 rather than appending; `add-labels`/`remove-labels` edit incrementally. Descriptions and comment
