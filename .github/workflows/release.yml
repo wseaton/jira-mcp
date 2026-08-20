@@ -33,11 +33,15 @@ jobs:
       - run: cargo build --release --target ${{ matrix.target }}
       # no version in the filename so releases/latest/download URLs stay stable
       - name: package
-        run: tar -czf ujira-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release ujira
+        run: |
+          tar -czf ujira-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release ujira
+          shasum -a 256 ujira-${{ matrix.target }}.tar.gz > ujira-${{ matrix.target }}.tar.gz.sha256
       - uses: actions/upload-artifact@v4
         with:
           name: ujira-${{ matrix.target }}
-          path: ujira-*.tar.gz
+          path: |
+            ujira-*.tar.gz
+            ujira-*.tar.gz.sha256
 
   release:
     needs: build
@@ -48,4 +52,7 @@ jobs:
           merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
-          files: ujira-*.tar.gz
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: |
+            ujira-*.tar.gz
+            ujira-*.tar.gz.sha256

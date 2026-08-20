@@ -1,7 +1,7 @@
 [package]
 name = "ujira"
 description = "A tiny, token-frugal MCP server and CLI for JIRA Cloud: sixteen tools, compact plain-text output."
-version = "0.7.0"
+version = "0.8.0-rc.1"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/wseaton/ujira"
@@ -20,6 +20,11 @@ reqwest = { version = "0.13", default-features = false, features = ["json", "que
 toml = "1.1.3"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+self-replace = "1.5.0"
+flate2 = "1.1.9"
+tar = "0.4.46"
+sha2 = "0.11.0"
+tempfile = "3.27.0"
 
 [profile.release]
 # A stdio server that lives in the background: small binary, fast startup.
